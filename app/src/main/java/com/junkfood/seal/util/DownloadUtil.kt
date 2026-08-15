@@ -38,11 +38,12 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.youtubedl_android.YoutubeDLResponse
+import java.io.File
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import java.util.Locale
 
 object DownloadUtil {
 
@@ -58,6 +59,27 @@ object DownloadUtil {
     private val jsonFormat = Json { ignoreUnknownKeys = true }
 
     private const val TAG = "DownloadUtil"
+
+    private const val EXTERNAL_JS_MINIMUM_YTDLP_VERSION = "2025.11.12"
+
+    internal fun supportsExternalJavaScriptRuntime(version: String?): Boolean {
+        val normalizedVersion =
+            version?.let { Regex("\\d{4}\\.\\d{2}\\.\\d{2}").find(it)?.value } ?: return false
+        return normalizedVersion >= EXTERNAL_JS_MINIMUM_YTDLP_VERSION
+    }
+
+    /** Adds the bundled QuickJS-NG executable only to yt-dlp releases that support EJS. */
+    private fun YoutubeDLRequest.enableJavascriptRuntime(): YoutubeDLRequest = apply {
+        val version = runCatching { YoutubeDL.getInstance().version(context) }.getOrNull()
+        if (!supportsExternalJavaScriptRuntime(version)) return@apply
+
+        val quickJs = File(context.applicationInfo.nativeLibraryDir, "libqjs.so")
+        if (quickJs.isFile) {
+            addOption("--js-runtimes", "quickjs:${quickJs.absolutePath}")
+        } else {
+            Log.w(TAG, "QuickJS runtime was not extracted to ${quickJs.absolutePath}")
+        }
+    }
 
     const val BASENAME = "%(title).200B"
 
@@ -90,7 +112,7 @@ object DownloadUtil {
     ): Result<YoutubeDLInfo> =
         YoutubeDL.runCatching {
             ToastUtil.makeToastSuspend(context.getString(R.string.fetching_playlist_info))
-            val request = YoutubeDLRequest(playlistURL)
+            val request = YoutubeDLRequest(playlistURL).enableJavascriptRuntime()
             with(request) {
                 //            addOption("--compat-options", "no-youtube-unavailable-videos")
                 addOption("--flat-playlist")
@@ -145,7 +167,7 @@ object DownloadUtil {
     ): Result<VideoInfo> {
         with(preferences) {
             val request =
-                YoutubeDLRequest(url).apply {
+                YoutubeDLRequest(url).enableJavascriptRuntime().apply {
                     addOption("-o", BASENAME)
                     if (restrictFilenames) {
                         addOption("--restrict-filenames")
@@ -677,7 +699,7 @@ object DownloadUtil {
                             Throwable(context.getString(R.string.fetch_info_error_msg))
                         )
                 }
-            val request = YoutubeDLRequest(url)
+            val request = YoutubeDLRequest(url).enableJavascriptRuntime()
             val pathBuilder = StringBuilder()
             val outputBuilder = StringBuilder()
 
@@ -884,7 +906,7 @@ object DownloadUtil {
 
         val request =
             with(preferences) {
-                YoutubeDLRequest(urlList).apply {
+                YoutubeDLRequest(urlList).enableJavascriptRuntime().apply {
                     commandDirectory.takeIf { it.isNotEmpty() }?.let { addOption("-P", it) }
                     addOption("--newline")
                     if (aria2c) {
@@ -925,7 +947,7 @@ object DownloadUtil {
 
             ToastUtil.makeToastSuspend(context.getString(R.string.start_execute))
             val request =
-                YoutubeDLRequest(urlList).apply {
+                YoutubeDLRequest(urlList).enableJavascriptRuntime().apply {
                     commandDirectory.takeIf { it.isNotEmpty() }?.let { addOption("-P", it) }
                     addOption("--newline")
                     if (aria2c) {

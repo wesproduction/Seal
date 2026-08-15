@@ -54,17 +54,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshots.Snapshot
-import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -106,10 +102,10 @@ import com.junkfood.seal.ui.component.SealModalBottomSheet
 import com.junkfood.seal.ui.component.SelectionGroupDefaults
 import com.junkfood.seal.ui.component.SelectionGroupItem
 import com.junkfood.seal.ui.component.SelectionGroupRow
-import com.junkfood.seal.ui.page.downloadv2.configure.DownloadDialogViewModel.Action
 import com.junkfood.seal.ui.page.downloadv2.configure.Config
 import com.junkfood.seal.ui.page.downloadv2.configure.DownloadDialog
 import com.junkfood.seal.ui.page.downloadv2.configure.DownloadDialogViewModel
+import com.junkfood.seal.ui.page.downloadv2.configure.DownloadDialogViewModel.Action
 import com.junkfood.seal.ui.page.downloadv2.configure.FormatPage
 import com.junkfood.seal.ui.page.downloadv2.configure.PlaylistSelectionPage
 import com.junkfood.seal.ui.page.downloadv2.configure.PreferencesMock
@@ -125,6 +121,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -206,9 +205,11 @@ fun DownloadPageV2(
     val clipboardManager = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
 
+    val taskDownloadStateMap by downloader.taskStateFlow.collectAsStateWithLifecycle()
+
     DownloadPageImplV2(
         modifier = modifier,
-        taskDownloadStateMap = downloader.getTaskStateMap(),
+        taskDownloadStateMap = taskDownloadStateMap,
         downloadCallback = {
             view.slightHapticFeedback()
             dialogViewModel.postAction(Action.ShowSheet())
@@ -316,15 +317,15 @@ private const val HeaderSpacingDp = 28
 @Composable
 fun DownloadPageImplV2(
     modifier: Modifier = Modifier,
-    taskDownloadStateMap: SnapshotStateMap<Task, Task.State>,
+    taskDownloadStateMap: Map<Task, Task.State>,
     downloadCallback: () -> Unit = {},
     onMenuOpen: (() -> Unit) = {},
     onActionPost: (Task, UiAction) -> Unit,
 ) {
     var activeFilter by remember { mutableStateOf(Filter.All) }
-    val filteredMap by
-        remember(activeFilter) {
-            derivedStateOf { taskDownloadStateMap.filter { activeFilter.predict(it.toPair()) } }
+    val filteredMap =
+        remember(activeFilter, taskDownloadStateMap) {
+            taskDownloadStateMap.filter { activeFilter.predict(it.toPair()) }
         }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -344,7 +345,7 @@ fun DownloadPageImplV2(
 
     LaunchedEffect(selectedTask, taskDownloadStateMap.size) {
         if (!taskDownloadStateMap.contains(selectedTask)) {
-            selectedTask == null
+            selectedTask = null
         }
     }
 
@@ -728,7 +729,10 @@ fun SubHeader(
 internal class DownloadPageV2Test {
     private val mockDownloader =
         object : DownloaderV2 {
-            private val map = mutableStateMapOf<Task, Task.State>()
+            private val mutableTaskStateFlow = MutableStateFlow<Map<Task, Task.State>>(emptyMap())
+
+            override val taskStateFlow: StateFlow<Map<Task, Task.State>> =
+                mutableTaskStateFlow.asStateFlow()
 
             init {
                 val viewState =
@@ -739,7 +743,7 @@ internal class DownloadPageV2Test {
                         Task.State(Canceled(Task.RestartableAction.Download), null, viewState),
                         Task.State(Completed(null), null, viewState),
                     )
-                map.run {
+                mutableTaskStateFlow.value = buildMap {
                     repeat(9) {
                         put(Task(url = "$it", preferences = PreferencesMock), list[it % 3])
                     }
@@ -750,7 +754,7 @@ internal class DownloadPageV2Test {
                     while (true) {
                         delay(1000)
                         val newEntries =
-                            map.toMap().map { (task, state) ->
+                            mutableTaskStateFlow.value.map { (task, state) ->
                                 val newDownloadState =
                                     when (state.downloadState) {
                                         is Canceled -> Idle
@@ -767,18 +771,9 @@ internal class DownloadPageV2Test {
                                     }
                                 task to state.copy(downloadState = newDownloadState)
                             }
-                        Snapshot.withMutableSnapshot {
-                            newEntries.forEach { (task, state) ->
-                                delay(100)
-                                map[task] = state
-                            }
-                        }
+                        mutableTaskStateFlow.value = newEntries.toMap()
                     }
                 }
-            }
-
-            override fun getTaskStateMap(): SnapshotStateMap<Task, Task.State> {
-                return map
             }
 
             override fun cancel(task: Task): Boolean {
@@ -802,10 +797,11 @@ internal class DownloadPageV2Test {
     private fun Preview() {
 
         val downloader: DownloaderV2 = mockDownloader
+        val taskStateMap by downloader.taskStateFlow.collectAsStateWithLifecycle()
         SealTheme {
             Column() {
                 DownloadPageImplV2(
-                    taskDownloadStateMap = downloader.getTaskStateMap(),
+                    taskDownloadStateMap = taskStateMap,
                     onActionPost = { task, state -> },
                     onMenuOpen = {},
                 )

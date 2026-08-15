@@ -37,6 +37,7 @@ private const val LGPL_V2_1 = "GNU Lesser General Public License, version 2.1"
 private const val APACHE_V2 = "Apache License, Version 2.0"
 private const val UNLICENSE = "The Unlicense"
 private const val BSD = "BSD 3-Clause License"
+private const val MIT = "MIT License"
 
 private const val youtubedlAndroidUrl = "https://github.com/yausername/youtubedl-android"
 private const val ytdlpUrl = "https://github.com/yt-dlp/yt-dlp"
@@ -58,6 +59,7 @@ private const val unDraw = "https://undraw.co/"
 private const val materialMotionCompose = "https://github.com/fornewid/material-motion-compose"
 private const val termux = "https://github.com/termux/termux-app"
 private const val FFmpeg = "https://ffmpeg.org/"
+private const val quickJsNg = "https://github.com/quickjs-ng/quickjs"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,6 +73,7 @@ fun CreditsPage(onNavigateBack: () -> Unit) {
     val creditsList =
         listOf(
             Credit("yt-dlp", UNLICENSE, ytdlpUrl),
+            Credit("QuickJS-NG", MIT, quickJsNg),
             Credit("Read You", GPL_V3, readYou),
             Credit("youtubedl-android", GPL_V3, youtubedlAndroidUrl),
             Credit("Termux", GPL_V3, termux),

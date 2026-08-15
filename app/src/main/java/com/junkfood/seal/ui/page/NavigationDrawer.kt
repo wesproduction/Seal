@@ -49,7 +49,6 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -421,9 +420,7 @@ private fun ExpandedPreview() {
                 onNavigateToRoute = { currentRoute.value = it },
                 onDismissRequest = {},
             ) {
-                DownloadPageImplV2(taskDownloadStateMap = remember { mutableStateMapOf() }) { _, _
-                    ->
-                }
+                DownloadPageImplV2(taskDownloadStateMap = emptyMap()) { _, _ -> }
             }
         }
     }

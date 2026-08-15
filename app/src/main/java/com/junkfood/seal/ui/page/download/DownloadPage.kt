@@ -146,6 +146,7 @@ fun DownloadPage(
     val videoInfo by homePageViewModel.videoInfoFlow.collectAsStateWithLifecycle()
     val errorState by Downloader.errorState.collectAsStateWithLifecycle()
     val processCount by Downloader.processCount.collectAsStateWithLifecycle()
+    val queuedTasks by downloader.taskStateFlow.collectAsStateWithLifecycle()
 
     var showNotificationDialog by remember { mutableStateOf(false) }
     val notificationPermission =
@@ -280,7 +281,7 @@ fun DownloadPage(
             onUrlChanged = { url -> homePageViewModel.updateUrl(url) },
         ) {
             Column {
-                downloader.getTaskStateMap().forEach { (task, state) ->
+                queuedTasks.forEach { (task, state) ->
                     Text(state.viewState.toString(), maxLines = 2)
                     Text(state.toString())
                     Spacer(Modifier.height(12.dp))
@@ -403,8 +404,7 @@ fun DownloadPageImpl(
                     ) {
                         TooltipBox(
                             state = rememberTooltipState(),
-                            positionProvider =
-                                TooltipDefaults.rememberTooltipPositionProvider(),
+                            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(),
                             tooltip = {
                                 PlainTooltip {
                                     Text(text = stringResource(id = R.string.running_tasks))

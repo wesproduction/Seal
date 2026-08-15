@@ -9,6 +9,7 @@ import com.junkfood.seal.util.DownloadUtil
 import com.junkfood.seal.util.PlaylistResult
 import com.junkfood.seal.util.VideoInfo
 import com.yausername.youtubedl_android.YoutubeDL
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,7 +117,7 @@ class DownloadDialogViewModel(private val downloader: DownloaderV2) : ViewModel(
         val (url, preferences) = action
 
         val job =
-            viewModelScope.launch(Dispatchers.IO) {
+            viewModelScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
                 DownloadUtil.getPlaylistOrVideoInfo(
                         playlistURL = url,
                         downloadPreferences = preferences,
@@ -144,13 +145,14 @@ class DownloadDialogViewModel(private val downloader: DownloaderV2) : ViewModel(
                     }
             }
         mSheetStateFlow.update { SheetState.Loading(taskKey = "FetchPlaylist_$url", job = job) }
+        job.start()
     }
 
     private fun fetchFormat(action: Action.FetchFormats) {
         val (url, audioOnly, preferences) = action
 
         val job =
-            viewModelScope.launch(Dispatchers.IO) {
+            viewModelScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
                 DownloadUtil.fetchVideoInfoFromUrl(
                         url = url,
                         preferences = preferences.copy(extractAudio = audioOnly),
@@ -172,6 +174,7 @@ class DownloadDialogViewModel(private val downloader: DownloaderV2) : ViewModel(
             }
 
         mSheetStateFlow.update { SheetState.Loading(taskKey = "FetchFormat_$url", job = job) }
+        job.start()
     }
 
     private fun downloadWithPreset(

@@ -43,8 +43,8 @@ import com.junkfood.seal.ui.common.id
 import com.junkfood.seal.ui.common.slideInVerticallyComposable
 import com.junkfood.seal.ui.page.command.TaskListPage
 import com.junkfood.seal.ui.page.command.TaskLogPage
-import com.junkfood.seal.ui.page.downloadv2.configure.DownloadDialogViewModel
 import com.junkfood.seal.ui.page.downloadv2.DownloadPageV2
+import com.junkfood.seal.ui.page.downloadv2.configure.DownloadDialogViewModel
 import com.junkfood.seal.ui.page.settings.SettingsPage
 import com.junkfood.seal.ui.page.settings.about.AboutPage
 import com.junkfood.seal.ui.page.settings.about.CreditsPage
@@ -82,6 +82,7 @@ fun AppEntry(dialogViewModel: DownloadDialogViewModel) {
     val view = LocalView.current
     val windowWidth = LocalWindowWidthState.current
     val sheetState by dialogViewModel.sheetStateFlow.collectAsStateWithLifecycle()
+    val sheetValue by dialogViewModel.sheetValueFlow.collectAsStateWithLifecycle()
     val cookiesViewModel: CookiesViewModel = koinViewModel()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -97,14 +98,24 @@ fun AppEntry(dialogViewModel: DownloadDialogViewModel) {
         }
     }
 
-    if (sheetState is DownloadDialogViewModel.SheetState.Configure) {
-        if (navController.currentDestination?.route != Route.HOME) {
-            navController.popBackStack(route = Route.HOME, inclusive = false, saveState = true)
-        }
-    }
-
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     var currentTopDestination by rememberSaveable { mutableStateOf(currentRoute) }
+
+    // A shared URL can open the configuration sheet while another destination is visible. Only
+    // return Home while that sheet is actually open; a hidden sheet intentionally retains its last
+    // configuration, and must not trap navigation on the Home destination.
+    LaunchedEffect(sheetState, sheetValue, currentRoute) {
+        if (
+            sheetState is DownloadDialogViewModel.SheetState.Configure &&
+                sheetValue is DownloadDialogViewModel.SheetValue.Expanded &&
+                currentRoute != Route.HOME
+        ) {
+            navController.navigate(Route.HOME) {
+                launchSingleTop = true
+                popUpTo(route = Route.HOME)
+            }
+        }
+    }
 
     LaunchedEffect(currentRoute) {
         if (currentRoute in TopDestinations) {

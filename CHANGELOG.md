@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v2.0.0][2.0.0] - unreleased
 
+### Added
+
+- Bundle QuickJS-NG for current yt-dlp YouTube JavaScript challenge support
+
+### Fixed
+
+- Publish download queue state safely across yt-dlp worker threads so progress is visible and the
+  queue does not freeze
+- Prevent fast metadata and download jobs from overwriting completed or failed states with a stale
+  loading state
+- Allow Settings to open after a preset download closes the configuration sheet
+- Clear a selected queue item after deletion instead of leaving the All screen stuck
+- Preserve unfinished task recovery while limiting backup writes from noisy progress callbacks
+- Correct the Belarusian video-count plural resource so Android lint succeeds
+
 ### Notable changes from v1.13
 
 - Concurrent downloading
