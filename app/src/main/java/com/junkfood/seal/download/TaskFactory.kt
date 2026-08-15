@@ -177,7 +177,7 @@ object TaskFactory {
             append(" [${post.id}]")
         }
         return buildList {
-                add("Reddit")
+                add(RedditMediaDownloader.DIRECTORY_NAME)
                 collection?.name?.let(RedditMediaDownloader::sanitizeFileName)?.let(::add)
                 if (separatePostFolders) {
                     add(postFolder)

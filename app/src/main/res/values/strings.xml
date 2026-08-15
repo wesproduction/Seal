@@ -130,7 +130,7 @@
     <string name="subdirectory">Save to subdirectory</string>
     <string name="subdirectory_desc">Save files in folders named as respective fields</string>
     <string name="reddit_separate_post_folders">Separate Reddit post folders</string>
-    <string name="reddit_separate_post_folders_desc">Keep each Reddit post in its own folder. Samsung Gallery will show each folder as a separate album.</string>
+    <string name="reddit_separate_post_folders_desc">Off groups direct shares in Seal Reddit and bulk downloads by source. On makes every post a separate Samsung Gallery album.</string>
     <string name="permission_issue">Storage permission issue</string>
     <string name="permission_issue_desc">Directories outside Download/ and Documents/ are not supported</string>
     <string name="battery_configuration">Battery configuration</string>
