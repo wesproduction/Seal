@@ -8,6 +8,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.junkfood.seal.App.Companion.context
 import com.junkfood.seal.ui.common.LocalDarkTheme
 import com.junkfood.seal.ui.common.SettingsProvider
@@ -23,10 +26,12 @@ import org.koin.compose.KoinContext
 
 class MainActivity : AppCompatActivity() {
     private val dialogViewModel: DownloadDialogViewModel by viewModel()
+    private var openRedditLoginRequest by mutableStateOf(false)
 
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openRedditLoginRequest = intent.getBooleanExtra(EXTRA_OPEN_REDDIT_LOGIN, false)
 
         if (Build.VERSION.SDK_INT < 33) {
             runBlocking { setLanguage(PreferenceUtil.getLocaleFromPreference()) }
@@ -42,7 +47,11 @@ class MainActivity : AppCompatActivity() {
                         darkTheme = LocalDarkTheme.current.isDarkTheme(),
                         isHighContrastModeEnabled = LocalDarkTheme.current.isHighContrastModeEnabled,
                     ) {
-                        AppEntry(dialogViewModel = dialogViewModel)
+                        AppEntry(
+                            dialogViewModel = dialogViewModel,
+                            openRedditLoginRequest = openRedditLoginRequest,
+                            onRedditLoginRequestConsumed = { openRedditLoginRequest = false },
+                        )
                     }
                 }
             }
@@ -51,6 +60,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_REDDIT_LOGIN, false)) {
+            openRedditLoginRequest = true
+            return
+        }
         val url = intent.getSharedURL()
         if (url != null) {
             dialogViewModel.postAction(DownloadDialogViewModel.Action.ShowSheet(listOf(url)))
@@ -85,5 +98,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private var sharedUrlCached = ""
+        const val EXTRA_OPEN_REDDIT_LOGIN = "com.junkfood.seal.extra.OPEN_REDDIT_LOGIN"
     }
 }

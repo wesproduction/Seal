@@ -1,6 +1,5 @@
 package com.junkfood.seal.ui.page
 
-import android.webkit.CookieManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +32,7 @@ import androidx.navigation.navArgument
 import androidx.navigation.navigation
 import com.junkfood.seal.App
 import com.junkfood.seal.R
+import com.junkfood.seal.database.objects.CookieProfile
 import com.junkfood.seal.ui.common.HapticFeedback.slightHapticFeedback
 import com.junkfood.seal.ui.common.LocalWindowWidthState
 import com.junkfood.seal.ui.common.Route
@@ -63,6 +63,7 @@ import com.junkfood.seal.ui.page.settings.interaction.InteractionPreferencePage
 import com.junkfood.seal.ui.page.settings.network.CookieProfilePage
 import com.junkfood.seal.ui.page.settings.network.CookiesViewModel
 import com.junkfood.seal.ui.page.settings.network.NetworkPreferences
+import com.junkfood.seal.ui.page.settings.network.REDDIT_LOGIN_URL
 import com.junkfood.seal.ui.page.settings.network.WebViewPage
 import com.junkfood.seal.ui.page.settings.troubleshooting.TroubleShootingPage
 import com.junkfood.seal.ui.page.videolist.VideoListPage
@@ -75,7 +76,11 @@ private val TopDestinations =
     listOf(Route.HOME, Route.TASK_LIST, Route.SETTINGS_PAGE, Route.DOWNLOADS)
 
 @Composable
-fun AppEntry(dialogViewModel: DownloadDialogViewModel) {
+fun AppEntry(
+    dialogViewModel: DownloadDialogViewModel,
+    openRedditLoginRequest: Boolean = false,
+    onRedditLoginRequestConsumed: () -> Unit = {},
+) {
 
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -89,6 +94,16 @@ fun AppEntry(dialogViewModel: DownloadDialogViewModel) {
     val versionReport = App.packageInfo.versionName.toString()
     val appName = stringResource(R.string.app_name)
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(openRedditLoginRequest) {
+        if (openRedditLoginRequest) {
+            cookiesViewModel.setEditingProfile(
+                CookieProfile(id = 0, url = REDDIT_LOGIN_URL, content = "")
+            )
+            navController.navigate(Route.COOKIE_GENERATOR_WEBVIEW) { launchSingleTop = true }
+            onRedditLoginRequestConsumed()
+        }
+    }
 
     val onNavigateBack: () -> Unit = {
         with(navController) {
@@ -265,9 +280,9 @@ fun NavGraphBuilder.settingsGraph(
             }
         }
         animatedComposable(Route.COOKIE_GENERATOR_WEBVIEW) {
-            WebViewPage(cookiesViewModel = cookiesViewModel) {
+            WebViewPage(cookiesViewModel = cookiesViewModel) { urls ->
+                cookiesViewModel.captureWebViewCookies(urls)
                 onNavigateBack()
-                CookieManager.getInstance().flush()
             }
         }
         animatedComposable(Route.TROUBLESHOOTING) {

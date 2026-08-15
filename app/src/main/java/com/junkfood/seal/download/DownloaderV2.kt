@@ -137,6 +137,10 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
     override val taskStateFlow: StateFlow<Map<Task, Task.State>> = queueState.state
 
     init {
+        // Restore synchronously so a share intent cannot enqueue a fresh task and then have the
+        // same task overwritten by stale backup state during a cold start.
+        enqueueFromBackup()
+
         scope.launch(Dispatchers.Default) {
             taskStateFlow
                 .map { queue -> queue.mapValues { (_, state) -> state.downloadState.phase } }
@@ -149,9 +153,6 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
         }
 
         scope.launch(Dispatchers.IO) {
-            // don't write before we read
-            enqueueFromBackup()
-
             taskStateFlow
                 .map { it.toBackupSnapshot() }
                 .distinctUntilChanged()
@@ -278,6 +279,8 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
         check(downloadState == Idle)
         if (type is TypeInfo.CustomCommand) {
             execute()
+        } else if (type is TypeInfo.RedditMedia) {
+            downloadState = ReadyWithInfo
         } else {
             fetchInfo()
         }
@@ -335,7 +338,12 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
     }
 
     private fun Task.download() {
-        check(downloadState == ReadyWithInfo && info != null)
+        check(downloadState == ReadyWithInfo)
+        if (type is TypeInfo.RedditMedia) {
+            downloadRedditMedia(type)
+            return
+        }
+        check(info != null)
         if (type is TypeInfo.CustomCommand) {
             execute()
             return
@@ -348,7 +356,7 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
                         videoInfo = videoInfo,
                         taskId = id,
                         downloadPreferences = preferences,
-                        progressCallback = { progressPercentage, _, text ->
+                        progressCallback = { progressPercentage, downloadedBytes, text ->
                             val progress = progressPercentage / 100f
                             val update =
                                 queueState.update(task) { current ->
@@ -360,7 +368,11 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
                                                 preState.copy(
                                                     progress = progress,
                                                     progressText = text,
-                                                )
+                                                ),
+                                            viewState =
+                                                current.viewState.copy(
+                                                    fileSizeApprox = downloadedBytes.toDouble()
+                                                ),
                                         )
                                 }
                             if (update?.previous?.downloadState is Running) {
@@ -408,6 +420,88 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
                         if (throwable is YoutubeDL.CanceledException) {
                             return@onFailure
                         }
+                        val update =
+                            queueState.update(task) { current ->
+                                if (current.downloadState !is Running) current
+                                else
+                                    current.copy(
+                                        downloadState =
+                                            Error(throwable = throwable, action = Download)
+                                    )
+                            }
+                        if (update?.previous?.downloadState is Running) {
+                            NotificationUtil.notifyError(
+                                title = update.previous.viewState.title,
+                                textId = R.string.download_error_msg,
+                                notificationId = notificationId,
+                                report = throwable.stackTraceToString(),
+                            )
+                        }
+                    }
+            }
+        downloadState = Running(job = job, taskId = id)
+        job.start()
+    }
+
+    private fun Task.downloadRedditMedia(media: TypeInfo.RedditMedia) {
+        val task = this
+        val job =
+            scope.launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
+                RedditMediaDownloader.download(
+                        media = media,
+                        preferences = preferences,
+                        progressCallback = { progressPercentage, _, text ->
+                            val progress =
+                                if (progressPercentage < 0f) -1f else progressPercentage / 100f
+                            val update =
+                                queueState.update(task) { current ->
+                                    val preState = current.downloadState
+                                    if (preState !is Running) current
+                                    else
+                                        current.copy(
+                                            downloadState =
+                                                preState.copy(
+                                                    progress = progress,
+                                                    progressText = text,
+                                                )
+                                        )
+                                }
+                            if (update?.previous?.downloadState is Running) {
+                                NotificationUtil.notifyProgress(
+                                    notificationId = notificationId,
+                                    progress = progressPercentage.coerceAtLeast(0f).toInt(),
+                                    text = text,
+                                    title = update.previous.viewState.title,
+                                    taskId = id,
+                                )
+                            }
+                        },
+                    )
+                    .onSuccess { pathList ->
+                        val update =
+                            queueState.update(task) { current ->
+                                if (current.downloadState !is Running) current
+                                else current.copy(downloadState = Completed(pathList.firstOrNull()))
+                            }
+                        if (update?.previous?.downloadState !is Running) return@onSuccess
+                        FileUtil.createIntentForOpeningFile(pathList.firstOrNull()).run {
+                            NotificationUtil.finishNotification(
+                                notificationId = notificationId,
+                                title = update.previous.viewState.title,
+                                text = appContext.getString(R.string.download_finish_notification),
+                                intent =
+                                    if (this != null)
+                                        PendingIntent.getActivity(
+                                            appContext,
+                                            0,
+                                            this,
+                                            PendingIntent.FLAG_IMMUTABLE,
+                                        )
+                                    else null,
+                            )
+                        }
+                    }
+                    .onFailure { throwable ->
                         val update =
                             queueState.update(task) { current ->
                                 if (current.downloadState !is Running) current

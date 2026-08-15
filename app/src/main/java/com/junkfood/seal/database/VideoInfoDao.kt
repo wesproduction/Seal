@@ -54,6 +54,8 @@ interface VideoInfoDao {
 
     @Query("select * from CookieProfile") fun getCookieProfileFlow(): Flow<List<CookieProfile>>
 
+    @Query("select * from CookieProfile") suspend fun getCookieProfileList(): List<CookieProfile>
+
     @Insert suspend fun insertTemplate(template: CommandTemplate): Long
 
     @Insert @Transaction suspend fun importTemplates(templateList: List<CommandTemplate>)
@@ -72,7 +74,7 @@ interface VideoInfoDao {
 
     @Delete suspend fun deleteCookieProfile(cookieProfile: CookieProfile)
 
-    @Insert suspend fun insertCookieProfile(cookieProfile: CookieProfile)
+    @Insert suspend fun insertCookieProfile(cookieProfile: CookieProfile): Long
 
     @Query("delete from CommandTemplate where id=:id") suspend fun deleteTemplateById(id: Int)
 

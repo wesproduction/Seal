@@ -6,11 +6,81 @@ import com.junkfood.seal.download.Task.DownloadState.ReadyWithInfo
 import com.junkfood.seal.util.DownloadUtil.DownloadPreferences
 import com.junkfood.seal.util.Format
 import com.junkfood.seal.util.PlaylistResult
+import com.junkfood.seal.util.RedditMediaResolver
 import com.junkfood.seal.util.VideoClip
 import com.junkfood.seal.util.VideoInfo
 import kotlin.math.roundToInt
 
 object TaskFactory {
+    @CheckResult
+    fun createFromRedditPost(
+        post: RedditMediaResolver.RedditPost,
+        preferences: DownloadPreferences,
+    ): List<TaskWithState> {
+        if (!post.isDirectMediaPost) {
+            return listOf(
+                TaskWithState(
+                    task = Task(url = post.canonicalUrl, preferences = preferences),
+                    state =
+                        Task.State(
+                            downloadState = Idle,
+                            videoInfo = null,
+                            viewState =
+                                Task.ViewState(
+                                    url = post.canonicalUrl,
+                                    title = post.title,
+                                    uploader = post.author,
+                                    extractorKey = "Reddit",
+                                ),
+                        ),
+                )
+            )
+        }
+
+        return post.media.map { media ->
+            val label =
+                if (media.total > 1) {
+                    "%0${media.total.toString().length}d/%d - %s"
+                        .format(media.index, media.total, post.title)
+                } else {
+                    post.title
+                }
+            val type =
+                Task.TypeInfo.RedditMedia(
+                    mediaId = media.id,
+                    mediaUrl = media.url,
+                    mimeType = media.mimeType,
+                    extension = media.extension,
+                    postId = post.id,
+                    postTitle = post.title,
+                    author = post.author,
+                    caption = media.caption,
+                    sourceUrl = post.canonicalUrl,
+                    index = media.index,
+                    total = media.total,
+                    createdUtc = post.createdUtc,
+                )
+            val task = Task(url = post.canonicalUrl, type = type, preferences = preferences)
+            TaskWithState(
+                task = task,
+                state =
+                    Task.State(
+                        downloadState = ReadyWithInfo,
+                        videoInfo = null,
+                        viewState =
+                            Task.ViewState(
+                                url = post.canonicalUrl,
+                                title = label,
+                                uploader = post.author,
+                                extractorKey = "Reddit",
+                                thumbnailUrl =
+                                    media.url.takeIf { media.mimeType.startsWith("image/") },
+                            ),
+                    ),
+            )
+        }
+    }
+
     /**
      * @return A [TaskWithState] with extra configurations made by user in the custom format
      *   selection page
@@ -102,7 +172,12 @@ object TaskFactory {
                         uploader = entry.uploader ?: entry.channel ?: playlistResult.channel ?: "",
                         thumbnailUrl = (entry.thumbnails?.lastOrNull()?.url) ?: "",
                     )
-                val task = Task(url = playlistUrl, preferences = preferences, type = Task.TypeInfo.Playlist(index))
+                val task =
+                    Task(
+                        url = playlistUrl,
+                        preferences = preferences,
+                        type = Task.TypeInfo.Playlist(index),
+                    )
                 val state =
                     Task.State(downloadState = Idle, videoInfo = null, viewState = viewState)
                 TaskWithState(task, state)

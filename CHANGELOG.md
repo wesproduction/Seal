@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Bundle QuickJS-NG for current yt-dlp YouTube JavaScript challenge support
+- Download Reddit image posts and galleries in Reddit's declared album order
+- Open Reddit shares directly in Seal and enqueue images, animated GIFs, and videos automatically
+- Sign in to Reddit inside Seal or import a Netscape `cookies.txt` file without developer tools
 
 ### Fixed
 
@@ -21,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clear a selected queue item after deletion instead of leaving the All screen stuck
 - Preserve unfinished task recovery while limiting backup writes from noisy progress callbacks
 - Correct the Belarusian video-count plural resource so Android lint succeeds
+- Capture modern encrypted WebView cookies through Android's supported cookie API
+- Show Reddit media progress, byte counts, completion, cancellation, retry, and download errors in
+  the regular queue and notifications
+- Save Reddit albums through scoped storage so repeat downloads and files owned by an older install
+  cannot fail with a red error state
+- Restore the queue before accepting cold-start shares so stale backup state cannot overwrite a new
+  Reddit download
 
 ### Notable changes from v1.13
 

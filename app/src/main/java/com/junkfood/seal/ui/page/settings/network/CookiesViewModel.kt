@@ -1,10 +1,16 @@
 package com.junkfood.seal.ui.page.settings.network
 
+import android.webkit.CookieManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.junkfood.seal.database.objects.CookieProfile
+import com.junkfood.seal.util.COOKIES
 import com.junkfood.seal.util.DatabaseUtil
+import com.junkfood.seal.util.DownloadUtil
+import com.junkfood.seal.util.DownloadUtil.toCookiesFileContent
+import com.junkfood.seal.util.PreferenceUtil.updateBoolean
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -40,12 +46,71 @@ class CookiesViewModel : ViewModel() {
 
     fun generateNewCookies(content: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            mutableStateFlow.update {
-                val newProfile = it.editingCookieProfile.copy(content = content)
-                DatabaseUtil.updateCookieProfile(newProfile)
-                it.copy(editingCookieProfile = newProfile)
+            persistProfile(state.editingCookieProfile.copy(content = content))
+            DownloadUtil.refreshCookiesFile()
+        }
+    }
+
+    fun captureWebViewCookies(urls: List<String>): Job {
+        val profile = state.editingCookieProfile
+        val targetUrls =
+            (urls + profile.url)
+                .filter { it.startsWith("http://") || it.startsWith("https://") }
+                .distinct()
+        val cookieManager = CookieManager.getInstance().apply { flush() }
+        val cookies =
+            targetUrls
+                .flatMap { url -> Cookie.fromCookieHeader(url, cookieManager.getCookie(url)) }
+                .distinctBy { Triple(it.domain, it.path, it.name) }
+
+        return viewModelScope.launch(Dispatchers.IO) {
+            if (cookies.isNotEmpty()) {
+                val savedUrl =
+                    if (cookies.any { it.domain.removePrefix(".").endsWith("reddit.com") }) {
+                        REDDIT_LOGIN_URL
+                    } else {
+                        profile.url
+                    }
+                persistProfile(
+                    profile.copy(url = savedUrl, content = cookies.toCookiesFileContent())
+                )
+                COOKIES.updateBoolean(true)
+                DownloadUtil.refreshCookiesFile()
             }
         }
+    }
+
+    fun importCookieFile(content: String): Boolean {
+        val cookies = Cookie.fromNetscapeFile(content)
+        if (cookies.isEmpty()) return false
+        val normalizedContent = cookies.toCookiesFileContent()
+        val primaryDomain = cookies.first().domain.removePrefix(".")
+        val profileUrl =
+            if (cookies.any { it.domain.removePrefix(".").endsWith("reddit.com") }) {
+                REDDIT_LOGIN_URL
+            } else {
+                "https://$primaryDomain/"
+            }
+
+        val cookieManager = CookieManager.getInstance()
+        cookies.forEach { cookie ->
+            val domain = cookie.domain.removePrefix(".")
+            val attributes = buildString {
+                append("${cookie.name}=${cookie.value}; Path=${cookie.path}; Domain=$domain")
+                if (cookie.secure) append("; Secure")
+            }
+            cookieManager.setCookie("https://$domain/", attributes)
+        }
+        cookieManager.flush()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            persistProfile(
+                CookieProfile(id = NEW_PROFILE_ID, url = profileUrl, content = normalizedContent)
+            )
+            COOKIES.updateBoolean(true)
+            DownloadUtil.refreshCookiesFile()
+        }
+        return true
     }
 
     fun updateUrl(url: String) {
@@ -58,12 +123,20 @@ class CookiesViewModel : ViewModel() {
         }
 
     fun updateCookieProfile(profile: CookieProfile = state.editingCookieProfile) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) { persistProfile(profile) }
+    }
+
+    private suspend fun persistProfile(profile: CookieProfile): CookieProfile {
+        val savedProfile =
             if (profile.id == NEW_PROFILE_ID) {
-                DatabaseUtil.insertCookieProfile(profile)
+                profile.copy(id = DatabaseUtil.insertCookieProfile(profile).toInt())
             } else {
                 DatabaseUtil.updateCookieProfile(profile)
+                profile
             }
-        }
+        mutableStateFlow.update { it.copy(editingCookieProfile = savedProfile) }
+        return savedProfile
     }
 }
+
+const val REDDIT_LOGIN_URL = "https://www.reddit.com/login/"

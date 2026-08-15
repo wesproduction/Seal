@@ -8,7 +8,17 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
@@ -17,7 +27,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import com.junkfood.seal.download.DownloaderV2
+import com.junkfood.seal.download.TaskFactory
 import com.junkfood.seal.ui.common.LocalDarkTheme
 import com.junkfood.seal.ui.common.SettingsProvider
 import com.junkfood.seal.ui.page.downloadv2.configure.Config
@@ -30,16 +45,24 @@ import com.junkfood.seal.ui.page.downloadv2.configure.PlaylistSelectionPage
 import com.junkfood.seal.ui.theme.SealTheme
 import com.junkfood.seal.util.DownloadUtil
 import com.junkfood.seal.util.PreferenceUtil
+import com.junkfood.seal.util.RedditMediaResolver
+import com.junkfood.seal.util.makeToast
 import com.junkfood.seal.util.matchUrlFromSharedText
 import com.junkfood.seal.util.setLanguage
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.getViewModel
 
 private const val TAG = "QuickDownloadActivity"
 
 class QuickDownloadActivity : ComponentActivity() {
     private var sharedUrlCached: String = ""
+    private val downloader: DownloaderV2 by inject()
+    private var redditJob: Job? = null
+    private var redditShareState by mutableStateOf<RedditShareState>(RedditShareState.Loading)
 
     private fun Intent.getSharedURL(): String? {
         val intent = this
@@ -90,6 +113,12 @@ class QuickDownloadActivity : ComponentActivity() {
 
         if (Build.VERSION.SDK_INT < 33) {
             runBlocking { setLanguage(PreferenceUtil.getLocaleFromPreference()) }
+        }
+
+        if (RedditMediaResolver.isRedditUrl(sharedUrlCached)) {
+            showRedditShareHandler()
+            resolveRedditShare()
+            return
         }
 
         val viewModel: DownloadDialogViewModel = getViewModel()
@@ -165,5 +194,110 @@ class QuickDownloadActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
+    private fun showRedditShareHandler() {
+        setContent {
+            SettingsProvider(calculateWindowSizeClass(this).widthSizeClass) {
+                SealTheme(
+                    darkTheme = LocalDarkTheme.current.isDarkTheme(),
+                    isHighContrastModeEnabled = LocalDarkTheme.current.isHighContrastModeEnabled,
+                ) {
+                    when (val state = redditShareState) {
+                        RedditShareState.Loading ->
+                            AlertDialog(
+                                onDismissRequest = { finish() },
+                                icon = { Icon(Icons.Outlined.Download, null) },
+                                title = { Text(getString(R.string.reddit_preparing_download)) },
+                                text = {
+                                    Row {
+                                        CircularProgressIndicator()
+                                        Spacer(Modifier.width(16.dp))
+                                        Text(getString(R.string.reddit_reading_post))
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { finish() }) {
+                                        Text(getString(android.R.string.cancel))
+                                    }
+                                },
+                                confirmButton = {},
+                            )
+
+                        is RedditShareState.Error ->
+                            AlertDialog(
+                                onDismissRequest = { finish() },
+                                icon = { Icon(Icons.Outlined.Download, null) },
+                                title = { Text(getString(R.string.reddit_download_error)) },
+                                text = { Text(state.throwable.message.orEmpty()) },
+                                dismissButton = {
+                                    TextButton(onClick = { finish() }) {
+                                        Text(getString(android.R.string.cancel))
+                                    }
+                                },
+                                confirmButton = {
+                                    Row {
+                                        TextButton(onClick = ::openRedditSignIn) {
+                                            Text(getString(R.string.reddit_sign_in))
+                                        }
+                                        TextButton(onClick = ::resolveRedditShare) {
+                                            Text(getString(R.string.retry))
+                                        }
+                                    }
+                                },
+                            )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun resolveRedditShare() {
+        redditJob?.cancel()
+        redditShareState = RedditShareState.Loading
+        redditJob =
+            lifecycleScope.launch {
+                try {
+                    val post = RedditMediaResolver.resolve(sharedUrlCached)
+                    val tasks =
+                        TaskFactory.createFromRedditPost(
+                            post = post,
+                            preferences = DownloadUtil.DownloadPreferences.createFromPreferences(),
+                        )
+                    tasks.forEach(downloader::enqueue)
+                    makeToast(
+                        resources.getQuantityString(
+                            R.plurals.reddit_items_queued,
+                            tasks.size,
+                            tasks.size,
+                        )
+                    )
+                    finish()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (throwable: Throwable) {
+                    redditShareState = RedditShareState.Error(throwable)
+                }
+            }
+    }
+
+    private fun openRedditSignIn() {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_OPEN_REDDIT_LOGIN, true)
+        )
+        finish()
+    }
+
+    override fun onDestroy() {
+        redditJob?.cancel()
+        super.onDestroy()
+    }
+
+    private sealed interface RedditShareState {
+        data object Loading : RedditShareState
+
+        data class Error(val throwable: Throwable) : RedditShareState
     }
 }

@@ -185,6 +185,20 @@
     <string name="aria2_desc">Use aria2c as the external downloader</string>
     <string name="cookies">Cookies</string>
     <string name="cookies_desc">Use Netscape formatted cookies for downloads</string>
+    <string name="save_cookies">Save cookies</string>
+    <string name="import_cookies_file">Import cookies.txt</string>
+    <string name="cookies_imported">Cookies imported and enabled</string>
+    <string name="cookies_import_failed">That file does not contain valid Netscape cookies</string>
+    <string name="reddit_sign_in">Sign in to Reddit</string>
+    <string name="reddit_sign_in_desc">Sign in inside the app, then tap Save cookies. No developer tools required.</string>
+    <string name="reddit_preparing_download">Preparing Reddit download</string>
+    <string name="reddit_reading_post">Reading the post and preserving its media order…</string>
+    <string name="reddit_download_error">Couldn’t read this Reddit post</string>
+    <string name="retry">Retry</string>
+    <plurals name="reddit_items_queued">
+        <item quantity="one">%d Reddit item added to downloads</item>
+        <item quantity="other">%d Reddit items added to downloads</item>
+    </plurals>
     <string name="cookies_file_name" translatable="false">cookies.txt</string>
     <string name="clear_temp_files">Clear temporary files</string>
     <string name="clear_temp_files_desc">Delete all temporary files from the temporary directory</string>
@@ -449,5 +463,9 @@
     <plurals name="audio_count">
         <item quantity="one">%d audio</item>
         <item quantity="other">%d audios</item>
+    </plurals>
+    <plurals name="image_count">
+        <item quantity="one">%d image</item>
+        <item quantity="other">%d images</item>
     </plurals>
 </resources>

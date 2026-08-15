@@ -41,6 +41,8 @@ object DatabaseUtil {
 
     fun getCookiesFlow() = dao.getCookieProfileFlow()
 
+    suspend fun getCookieProfileList() = dao.getCookieProfileList()
+
     fun getShortcuts() = dao.getOptionShortcuts()
 
     suspend fun deleteShortcut(shortcut: OptionShortcut) = dao.deleteShortcut(shortcut)
@@ -51,7 +53,7 @@ object DatabaseUtil {
 
     suspend fun deleteCookieProfile(profile: CookieProfile) = dao.deleteCookieProfile(profile)
 
-    suspend fun insertCookieProfile(profile: CookieProfile) = dao.insertCookieProfile(profile)
+    suspend fun insertCookieProfile(profile: CookieProfile): Long = dao.insertCookieProfile(profile)
 
     suspend fun updateCookieProfile(profile: CookieProfile) = dao.updateCookieProfile(profile)
 

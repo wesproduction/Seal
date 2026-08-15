@@ -437,14 +437,26 @@ fun DownloadPageImplV2(
                 ) {
                     if (filteredMap.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
+                            val imageCount =
+                                filteredMap.count { (task, _) ->
+                                    (task.type as? Task.TypeInfo.RedditMedia)
+                                        ?.mimeType
+                                        ?.startsWith("image/") == true
+                                }
                             val videoCount =
-                                filteredMap.count {
-                                    !it.value.viewState.videoFormats.isNullOrEmpty()
+                                filteredMap.count { (task, state) ->
+                                    val redditMedia = task.type as? Task.TypeInfo.RedditMedia
+                                    if (redditMedia != null) {
+                                        redditMedia.mimeType.startsWith("video/")
+                                    } else {
+                                        !state.viewState.videoFormats.isNullOrEmpty()
+                                    }
                                 }
                             SubHeader(
                                 modifier = Modifier,
                                 videoCount = videoCount,
-                                audioCount = filteredMap.size - videoCount,
+                                audioCount = filteredMap.size - videoCount - imageCount,
+                                imageCount = imageCount,
                                 isGridView = isGridView,
                                 onToggleView = { isGridView = !isGridView },
                                 onShowMenu = { context.makeToast("Not implemented yet!") },
@@ -667,21 +679,23 @@ fun SubHeader(
         },
     videoCount: Int = 0,
     audioCount: Int = 0,
+    imageCount: Int = 0,
     isGridView: Boolean = true,
     onToggleView: () -> Unit,
     onShowMenu: () -> Unit,
 ) {
-    val text = buildString {
+    val counts = buildList {
         if (videoCount > 0) {
-            append(pluralStringResource(R.plurals.video_count, videoCount).format(videoCount))
-            if (audioCount > 0) {
-                append(", ")
-            }
+            add(pluralStringResource(R.plurals.video_count, videoCount).format(videoCount))
         }
         if (audioCount > 0) {
-            append(pluralStringResource(R.plurals.audio_count, audioCount).format(audioCount))
+            add(pluralStringResource(R.plurals.audio_count, audioCount).format(audioCount))
+        }
+        if (imageCount > 0) {
+            add(pluralStringResource(R.plurals.image_count, imageCount).format(imageCount))
         }
     }
+    val text = counts.joinToString(", ")
 
     Row(
         modifier = modifier.padding(top = 12.dp, bottom = 12.dp),

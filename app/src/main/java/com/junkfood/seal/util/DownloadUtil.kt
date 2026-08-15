@@ -1,7 +1,5 @@
 package com.junkfood.seal.util
 
-import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteDatabase.OPEN_READONLY
 import android.media.MediaCodecList
 import android.os.Build
 import android.util.Log
@@ -22,6 +20,7 @@ import com.junkfood.seal.R
 import com.junkfood.seal.database.objects.CommandTemplate
 import com.junkfood.seal.database.objects.DownloadedVideoInfo
 import com.junkfood.seal.ui.page.settings.network.Cookie
+import com.junkfood.seal.ui.page.settings.network.toCookieHeader
 import com.junkfood.seal.util.FileUtil.getArchiveFile
 import com.junkfood.seal.util.FileUtil.getConfigFile
 import com.junkfood.seal.util.FileUtil.getCookiesFile
@@ -46,15 +45,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 object DownloadUtil {
-
-    object CookieScheme {
-        const val NAME = "name"
-        const val VALUE = "value"
-        const val SECURE = "is_secure"
-        const val EXPIRY = "expires_utc"
-        const val HOST = "host_key"
-        const val PATH = "path"
-    }
 
     private val jsonFormat = Json { ignoreUnknownKeys = true }
 
@@ -394,53 +384,16 @@ object DownloadUtil {
         this.addOption("--download-archive", context.getArchiveFile().absolutePath)
 
     @CheckResult
-    fun getCookieListFromDatabase(): Result<List<Cookie>> = runCatching {
-        CookieManager.getInstance().run {
-            if (!hasCookies()) throw Exception("There is no cookies in the database!")
-            flush()
-        }
-        SQLiteDatabase.openDatabase(
-                context.dataDir.resolve("app_webview/Default/Cookies").absolutePath,
-                null,
-                OPEN_READONLY,
-            )
-            .run {
-                val projection =
-                    arrayOf(
-                        CookieScheme.HOST,
-                        CookieScheme.EXPIRY,
-                        CookieScheme.PATH,
-                        CookieScheme.NAME,
-                        CookieScheme.VALUE,
-                        CookieScheme.SECURE,
-                    )
-                val cookieList = mutableListOf<Cookie>()
-                query("cookies", projection, null, null, null, null, null).run {
-                    while (moveToNext()) {
-                        val expiry = getLong(getColumnIndexOrThrow(CookieScheme.EXPIRY))
-                        val name = getString(getColumnIndexOrThrow(CookieScheme.NAME))
-                        val value = getString(getColumnIndexOrThrow(CookieScheme.VALUE))
-                        val path = getString(getColumnIndexOrThrow(CookieScheme.PATH))
-                        val secure = getLong(getColumnIndexOrThrow(CookieScheme.SECURE)) == 1L
-                        val hostKey = getString(getColumnIndexOrThrow(CookieScheme.HOST))
-
-                        val host = if (hostKey[0] != '.') ".$hostKey" else hostKey
-                        cookieList.add(
-                            Cookie(
-                                domain = host,
-                                name = name,
-                                value = value,
-                                path = path,
-                                secure = secure,
-                                expiry = expiry,
-                            )
-                        )
-                    }
-                    close()
-                }
-                close()
-                cookieList
+    suspend fun getCookieListFromDatabase(): Result<List<Cookie>> = runCatching {
+        val cookieManager = CookieManager.getInstance().apply { flush() }
+        DatabaseUtil.getCookieProfileList()
+            .flatMap { profile ->
+                Cookie.fromNetscapeFile(profile.content) +
+                    Cookie.fromCookieHeader(profile.url, cookieManager.getCookie(profile.url))
             }
+            .filter { it.name.isNotBlank() }
+            .distinctBy { Triple(it.domain, it.path, it.name) }
+            .also { if (it.isEmpty()) error("There are no saved cookies") }
     }
 
     fun List<Cookie>.toCookiesFileContent(): String =
@@ -449,8 +402,16 @@ object DownloadUtil {
             }
             .toString()
 
-    fun getCookiesContentFromDatabase(): Result<String> =
+    suspend fun getCookiesContentFromDatabase(): Result<String> =
         getCookieListFromDatabase().mapCatching { it.toCookiesFileContent() }
+
+    suspend fun refreshCookiesFile(): Result<File> =
+        getCookiesContentFromDatabase().mapCatching {
+            FileUtil.writeContentToFile(it, context.getCookiesFile())
+        }
+
+    suspend fun getCookieHeaderFor(url: String): String =
+        getCookieListFromDatabase().getOrDefault(emptyList()).toCookieHeader(url)
 
     private fun YoutubeDLRequest.enableAria2c(): YoutubeDLRequest =
         this.addOption("--downloader", "libaria2c.so")
@@ -553,11 +514,12 @@ object DownloadUtil {
                     7 -> "+res"
                     else -> ""
                 }
-            val sorter = if (videoFormat == FORMAT_COMPATIBILITY) {
-                connectWithDelimiter(format, res, delimiter = ",")
-            } else {
-                connectWithDelimiter(res, format, delimiter = ",")
-            }
+            val sorter =
+                if (videoFormat == FORMAT_COMPATIBILITY) {
+                    connectWithDelimiter(format, res, delimiter = ",")
+                } else {
+                    connectWithDelimiter(res, format, delimiter = ",")
+                }
             return@run sorter
         }
 

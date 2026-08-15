@@ -7,21 +7,25 @@ import com.junkfood.seal.util.DownloadUtil
 import com.junkfood.seal.util.Format
 import com.junkfood.seal.util.VideoInfo
 import com.junkfood.seal.util.toHttpsUrl
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
-import kotlin.math.roundToInt
 
 private val TypeInfo.id: String
     get() =
         when (this) {
             is TypeInfo.CustomCommand -> "${template.id}_${template.name}"
             is TypeInfo.Playlist -> "$index"
+            is TypeInfo.RedditMedia -> "reddit_${postId}_${index}_${mediaId}"
             TypeInfo.URL -> ""
         }
 
-private fun makeId(url: String, type: TypeInfo, preferences: DownloadUtil.DownloadPreferences): String =
-    "${url}_${type.id}_${preferences.hashCode()}"
+private fun makeId(
+    url: String,
+    type: TypeInfo,
+    preferences: DownloadUtil.DownloadPreferences,
+): String = "${url}_${type.id}_${preferences.hashCode()}"
 
 @Serializable
 data class Task(
@@ -43,6 +47,22 @@ data class Task(
         @Serializable data class Playlist(val index: Int = 0) : TypeInfo
 
         @Serializable data class CustomCommand(val template: CommandTemplate) : TypeInfo
+
+        @Serializable
+        data class RedditMedia(
+            val mediaId: String,
+            val mediaUrl: String,
+            val mimeType: String,
+            val extension: String,
+            val postId: String,
+            val postTitle: String,
+            val author: String,
+            val caption: String,
+            val sourceUrl: String,
+            val index: Int,
+            val total: Int,
+            val createdUtc: Long,
+        ) : TypeInfo
 
         @Serializable data object URL : TypeInfo
     }
