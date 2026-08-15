@@ -206,6 +206,7 @@ fun DownloadPageV2(
     val uriHandler = LocalUriHandler.current
 
     val taskDownloadStateMap by downloader.taskStateFlow.collectAsStateWithLifecycle()
+    var mediaPreview by remember { mutableStateOf<MediaPreviewState?>(null) }
 
     DownloadPageImplV2(
         modifier = modifier,
@@ -232,8 +233,20 @@ fun DownloadPageV2(
                 context.makeToast(R.string.link_copied)
             }
             is UiAction.OpenFile -> {
-                action.filePath?.let {
-                    FileUtil.openFile(path = it) { context.makeToast(R.string.file_unavailable) }
+                val state = taskDownloadStateMap[task]
+                val completed = state?.downloadState as? Completed
+                val preview =
+                    completed?.let {
+                        task.createMediaPreview(completed = it, title = state.viewState.title)
+                    }
+                if (preview != null) {
+                    mediaPreview = preview
+                } else {
+                    action.filePath?.let {
+                        FileUtil.openFile(path = it) {
+                            context.makeToast(R.string.file_unavailable)
+                        }
+                    }
                 }
             }
             is UiAction.OpenThumbnailURL -> {
@@ -249,6 +262,16 @@ fun DownloadPageV2(
                 }
             }
         }
+    }
+
+    mediaPreview?.let { preview ->
+        MediaPreviewDialog(
+            preview = preview,
+            onDismissRequest = { mediaPreview = null },
+            onOpenExternal = { path ->
+                FileUtil.openFile(path = path) { context.makeToast(R.string.file_unavailable) }
+            },
+        )
     }
 
     var preferences by remember {
@@ -437,25 +460,34 @@ fun DownloadPageImplV2(
                 ) {
                     if (filteredMap.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
-                            val imageCount =
-                                filteredMap.count { (task, _) ->
-                                    (task.type as? Task.TypeInfo.RedditMedia)
-                                        ?.mimeType
-                                        ?.startsWith("image/") == true
-                                }
-                            val videoCount =
-                                filteredMap.count { (task, state) ->
-                                    val redditMedia = task.type as? Task.TypeInfo.RedditMedia
-                                    if (redditMedia != null) {
-                                        redditMedia.mimeType.startsWith("video/")
-                                    } else {
-                                        !state.viewState.videoFormats.isNullOrEmpty()
+                            var imageCount = 0
+                            var videoCount = 0
+                            var audioCount = 0
+                            filteredMap.forEach { (task, state) ->
+                                when (val type = task.type) {
+                                    is Task.TypeInfo.RedditAlbum -> {
+                                        imageCount +=
+                                            type.items.count { it.mimeType.startsWith("image/") }
+                                        videoCount +=
+                                            type.items.count { it.mimeType.startsWith("video/") }
+                                    }
+
+                                    is Task.TypeInfo.RedditMedia -> {
+                                        if (type.mimeType.startsWith("image/")) imageCount++
+                                        else videoCount++
+                                    }
+
+                                    else -> {
+                                        if (!state.viewState.videoFormats.isNullOrEmpty())
+                                            videoCount++
+                                        else audioCount++
                                     }
                                 }
+                            }
                             SubHeader(
                                 modifier = Modifier,
                                 videoCount = videoCount,
-                                audioCount = filteredMap.size - videoCount - imageCount,
+                                audioCount = audioCount,
                                 imageCount = imageCount,
                                 isGridView = isGridView,
                                 onToggleView = { isGridView = !isGridView },
@@ -466,8 +498,7 @@ fun DownloadPageImplV2(
 
                     if (isGridView) {
                         items(
-                            items =
-                                filteredMap.toList().sortedBy { (_, state) -> state.downloadState },
+                            items = filteredMap.toList().sortedForQueueDisplay(),
                             key = { (task, _) -> task.id },
                         ) { (task, state) ->
                             with(state.viewState) {
@@ -488,14 +519,22 @@ fun DownloadPageImplV2(
                                             downloadState = state.downloadState,
                                         )
                                     },
+                                    onClick =
+                                        (state.downloadState as? Completed)?.let { completed ->
+                                            {
+                                                onActionPost(
+                                                    task,
+                                                    UiAction.OpenFile(completed.filePath),
+                                                )
+                                            }
+                                        },
                                     onButtonClick = { showActionSheet(task) },
                                 )
                             }
                         }
                     } else {
                         items(
-                            items =
-                                filteredMap.toList().sortedBy { (_, state) -> state.downloadState },
+                            items = filteredMap.toList().sortedForQueueDisplay(),
                             key = { (task, _) -> task.id },
                             span = { GridItemSpan(maxLineSpan) },
                         ) { (task, state) ->
@@ -508,6 +547,15 @@ fun DownloadPageImplV2(
                                         downloadState = state.downloadState,
                                     )
                                 },
+                                onClick =
+                                    (state.downloadState as? Completed)?.let { completed ->
+                                        {
+                                            onActionPost(
+                                                task,
+                                                UiAction.OpenFile(completed.filePath),
+                                            )
+                                        }
+                                    },
                                 onButtonClick = { showActionSheet(task) },
                             )
                         }
@@ -546,6 +594,19 @@ fun DownloadPageImplV2(
         }
     }
 }
+
+internal fun List<Pair<Task, Task.State>>.sortedForQueueDisplay(): List<Pair<Task, Task.State>> =
+    sortedWith { left, right ->
+        val stateOrder = left.second.downloadState.compareTo(right.second.downloadState)
+        if (stateOrder != 0) stateOrder
+        else {
+            val leftCompleted = left.second.downloadState as? Completed
+            val rightCompleted = right.second.downloadState as? Completed
+            if (leftCompleted != null && rightCompleted != null)
+                rightCompleted.completedAt.compareTo(leftCompleted.completedAt)
+            else 0
+        }
+    }
 
 @Composable
 fun Header(modifier: Modifier = Modifier, onMenuOpen: () -> Unit = {}) {

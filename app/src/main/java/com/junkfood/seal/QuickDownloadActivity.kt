@@ -49,6 +49,7 @@ import com.junkfood.seal.util.RedditMediaResolver
 import com.junkfood.seal.util.makeToast
 import com.junkfood.seal.util.matchUrlFromSharedText
 import com.junkfood.seal.util.setLanguage
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -62,7 +63,8 @@ class QuickDownloadActivity : ComponentActivity() {
     private var sharedUrlCached: String = ""
     private val downloader: DownloaderV2 by inject()
     private var redditJob: Job? = null
-    private var redditShareState by mutableStateOf<RedditShareState>(RedditShareState.Loading)
+    private var redditFeedTarget: RedditMediaResolver.FeedTarget? = null
+    private var redditShareState by mutableStateOf<RedditShareState>(RedditShareState.LoadingPost)
 
     private fun Intent.getSharedURL(): String? {
         val intent = this
@@ -116,8 +118,11 @@ class QuickDownloadActivity : ComponentActivity() {
         }
 
         if (RedditMediaResolver.isRedditUrl(sharedUrlCached)) {
+            redditFeedTarget = RedditMediaResolver.extractFeedTarget(sharedUrlCached)
+            redditShareState =
+                redditFeedTarget?.let(RedditShareState::ConfirmFeed) ?: RedditShareState.LoadingPost
             showRedditShareHandler()
-            resolveRedditShare()
+            if (redditFeedTarget == null) resolveRedditPost()
             return
         }
 
@@ -205,7 +210,7 @@ class QuickDownloadActivity : ComponentActivity() {
                     isHighContrastModeEnabled = LocalDarkTheme.current.isHighContrastModeEnabled,
                 ) {
                     when (val state = redditShareState) {
-                        RedditShareState.Loading ->
+                        RedditShareState.LoadingPost ->
                             AlertDialog(
                                 onDismissRequest = { finish() },
                                 icon = { Icon(Icons.Outlined.Download, null) },
@@ -216,6 +221,70 @@ class QuickDownloadActivity : ComponentActivity() {
                                         Spacer(Modifier.width(16.dp))
                                         Text(getString(R.string.reddit_reading_post))
                                     }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { finish() }) {
+                                        Text(getString(android.R.string.cancel))
+                                    }
+                                },
+                                confirmButton = {},
+                            )
+
+                        is RedditShareState.ConfirmFeed ->
+                            AlertDialog(
+                                onDismissRequest = { finish() },
+                                icon = { Icon(Icons.Outlined.Download, null) },
+                                title = {
+                                    Text(
+                                        getString(
+                                            R.string.reddit_feed_confirm_title,
+                                            state.target.displayName,
+                                        )
+                                    )
+                                },
+                                text = {
+                                    Text(
+                                        getString(
+                                            R.string.reddit_feed_confirm_desc,
+                                            RedditMediaResolver.MAX_FEED_POSTS,
+                                            state.target.name,
+                                        )
+                                    )
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { finish() }) {
+                                        Text(getString(android.R.string.cancel))
+                                    }
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = { resolveRedditFeed(state.target) }) {
+                                        Text(getString(R.string.reddit_feed_download_all))
+                                    }
+                                },
+                            )
+
+                        is RedditShareState.ScanningFeed ->
+                            AlertDialog(
+                                onDismissRequest = { finish() },
+                                icon = { Icon(Icons.Outlined.Download, null) },
+                                title = {
+                                    Text(
+                                        getString(
+                                            R.string.reddit_feed_scanning_title,
+                                            state.progress.target.displayName,
+                                        )
+                                    )
+                                },
+                                text = {
+                                    Text(
+                                        getString(
+                                            R.string.reddit_feed_scanning_desc,
+                                            state.progress.scannedPosts,
+                                            RedditMediaResolver.MAX_FEED_POSTS,
+                                            state.progress.mediaPosts,
+                                            state.progress.mediaItems,
+                                        )
+                                    )
                                 },
                                 dismissButton = {
                                     TextButton(onClick = { finish() }) {
@@ -241,7 +310,7 @@ class QuickDownloadActivity : ComponentActivity() {
                                         TextButton(onClick = ::openRedditSignIn) {
                                             Text(getString(R.string.reddit_sign_in))
                                         }
-                                        TextButton(onClick = ::resolveRedditShare) {
+                                        TextButton(onClick = ::retryRedditShare) {
                                             Text(getString(R.string.retry))
                                         }
                                     }
@@ -253,9 +322,9 @@ class QuickDownloadActivity : ComponentActivity() {
         }
     }
 
-    private fun resolveRedditShare() {
+    private fun resolveRedditPost() {
         redditJob?.cancel()
-        redditShareState = RedditShareState.Loading
+        redditShareState = RedditShareState.LoadingPost
         redditJob =
             lifecycleScope.launch {
                 try {
@@ -282,6 +351,58 @@ class QuickDownloadActivity : ComponentActivity() {
             }
     }
 
+    private fun resolveRedditFeed(target: RedditMediaResolver.FeedTarget) {
+        redditJob?.cancel()
+        redditFeedTarget = target
+        redditShareState =
+            RedditShareState.ScanningFeed(
+                RedditMediaResolver.FeedProgress(
+                    target = target,
+                    scannedPosts = 0,
+                    mediaPosts = 0,
+                    mediaItems = 0,
+                )
+            )
+        redditJob =
+            lifecycleScope.launch {
+                try {
+                    val feed =
+                        RedditMediaResolver.resolveFeed(sharedUrlCached) { progress ->
+                            runOnUiThread {
+                                redditShareState = RedditShareState.ScanningFeed(progress)
+                            }
+                        }
+                    if (feed.posts.isEmpty()) {
+                        throw IOException(
+                            getString(R.string.reddit_feed_no_media, target.displayName)
+                        )
+                    }
+                    val tasks =
+                        TaskFactory.createFromRedditFeed(
+                            feed = feed,
+                            preferences = DownloadUtil.DownloadPreferences.createFromPreferences(),
+                        )
+                    tasks.forEach(downloader::enqueue)
+                    makeToast(
+                        resources.getQuantityString(
+                            R.plurals.reddit_items_queued,
+                            tasks.size,
+                            tasks.size,
+                        )
+                    )
+                    finish()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (throwable: Throwable) {
+                    redditShareState = RedditShareState.Error(throwable)
+                }
+            }
+    }
+
+    private fun retryRedditShare() {
+        redditFeedTarget?.let(::resolveRedditFeed) ?: resolveRedditPost()
+    }
+
     private fun openRedditSignIn() {
         startActivity(
             Intent(this, MainActivity::class.java)
@@ -296,7 +417,11 @@ class QuickDownloadActivity : ComponentActivity() {
     }
 
     private sealed interface RedditShareState {
-        data object Loading : RedditShareState
+        data object LoadingPost : RedditShareState
+
+        data class ConfirmFeed(val target: RedditMediaResolver.FeedTarget) : RedditShareState
+
+        data class ScanningFeed(val progress: RedditMediaResolver.FeedProgress) : RedditShareState
 
         data class Error(val throwable: Throwable) : RedditShareState
     }

@@ -17,7 +17,10 @@ private val TypeInfo.id: String
         when (this) {
             is TypeInfo.CustomCommand -> "${template.id}_${template.name}"
             is TypeInfo.Playlist -> "$index"
-            is TypeInfo.RedditMedia -> "reddit_${postId}_${index}_${mediaId}"
+            is TypeInfo.RedditAlbum ->
+                "reddit_album_${collectionName.orEmpty()}_${collectionIndex}_${postId}"
+            is TypeInfo.RedditMedia ->
+                "reddit_${collectionName.orEmpty()}_${collectionIndex}_${postId}_${index}_${mediaId}"
             TypeInfo.URL -> ""
         }
 
@@ -49,6 +52,30 @@ data class Task(
         @Serializable data class CustomCommand(val template: CommandTemplate) : TypeInfo
 
         @Serializable
+        data class RedditAlbum(
+            val postId: String,
+            val postTitle: String,
+            val author: String,
+            val sourceUrl: String,
+            val createdUtc: Long,
+            val items: List<RedditAlbumItem>,
+            val collectionName: String? = null,
+            val collectionIndex: Int = 0,
+            val collectionTotal: Int = 0,
+        ) : TypeInfo
+
+        @Serializable
+        data class RedditAlbumItem(
+            val mediaId: String,
+            val mediaUrl: String,
+            val mimeType: String,
+            val extension: String,
+            val caption: String,
+            val index: Int,
+            val total: Int,
+        )
+
+        @Serializable
         data class RedditMedia(
             val mediaId: String,
             val mediaUrl: String,
@@ -62,6 +89,9 @@ data class Task(
             val index: Int,
             val total: Int,
             val createdUtc: Long,
+            val collectionName: String? = null,
+            val collectionIndex: Int = 0,
+            val collectionTotal: Int = 0,
         ) : TypeInfo
 
         @Serializable data object URL : TypeInfo
@@ -119,7 +149,15 @@ data class Task(
             override val action: RestartableAction,
         ) : DownloadState, Restartable
 
-        @Serializable data class Completed(val filePath: String?) : DownloadState
+        @Serializable
+        data class Completed(
+            val filePath: String?,
+            val filePaths: List<String> = emptyList(),
+            val completedAt: Long = System.currentTimeMillis(),
+        ) : DownloadState {
+            val orderedFilePaths: List<String>
+                get() = filePaths.ifEmpty { filePath?.let(::listOf).orEmpty() }
+        }
 
         override fun compareTo(other: DownloadState): Int {
             return ordinal - other.ordinal

@@ -47,6 +47,15 @@ class RedditMediaDownloaderTest {
         }
     }
 
+    @Test
+    fun collectionPostFoldersAreZeroPaddedAndNamedForTheFeed() {
+        val media =
+            media(index = 1, total = 3, caption = "")
+                .copy(collectionName = "Android_Pics", collectionIndex = 4, collectionTotal = 120)
+
+        assertEquals("004 - Album [post]", RedditMediaDownloader.orderedPostDirectoryName(media))
+    }
+
     private fun media(index: Int, total: Int, caption: String) =
         RedditMedia(
             mediaId = "media-$index",

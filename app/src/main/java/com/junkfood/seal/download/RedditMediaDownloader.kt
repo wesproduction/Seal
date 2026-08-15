@@ -1,5 +1,6 @@
 package com.junkfood.seal.download
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -12,6 +13,8 @@ import com.junkfood.seal.App
 import com.junkfood.seal.App.Companion.context
 import com.junkfood.seal.App.Companion.videoDownloadDir
 import com.junkfood.seal.BuildConfig
+import com.junkfood.seal.download.Task.TypeInfo.RedditAlbum
+import com.junkfood.seal.download.Task.TypeInfo.RedditAlbumItem
 import com.junkfood.seal.download.Task.TypeInfo.RedditMedia
 import com.junkfood.seal.util.DownloadUtil
 import com.junkfood.seal.util.DownloadUtil.DownloadPreferences
@@ -31,6 +34,85 @@ object RedditMediaDownloader {
     private const val BUFFER_SIZE = 64 * 1024
     private val client =
         OkHttpClient.Builder().followRedirects(true).followSslRedirects(true).build()
+
+    suspend fun downloadAlbum(
+        album: RedditAlbum,
+        preferences: DownloadPreferences,
+        progressCallback: ((Float, Long, String) -> Unit)?,
+    ): Result<List<String>> {
+        if (album.items.isEmpty()) return Result.failure(IOException("This Reddit album is empty"))
+        val downloadedPaths = mutableListOf<String>()
+        var completedBytes = 0L
+        album.items.forEachIndexed { completedItems, item ->
+            var currentBytes = 0L
+            val result =
+                download(
+                    media = album.toMedia(item),
+                    preferences = preferences,
+                    progressCallback = { itemProgress, downloadedBytes, _ ->
+                        currentBytes = downloadedBytes
+                        val boundedItemProgress = itemProgress.coerceIn(0f, 100f)
+                        val overallProgress =
+                            (completedItems + boundedItemProgress / 100f) * 100f / album.items.size
+                        val text =
+                            if (itemProgress >= 0f) {
+                                "${completedItems + 1}/${album.items.size} - ${itemProgress.toInt()}%"
+                            } else {
+                                "${completedItems + 1}/${album.items.size}"
+                            }
+                        progressCallback?.invoke(
+                            overallProgress,
+                            completedBytes + downloadedBytes,
+                            text,
+                        )
+                    },
+                )
+            result
+                .onSuccess { downloadedPaths += it }
+                .onFailure {
+                    return Result.failure(it)
+                }
+            completedBytes += currentBytes
+            progressCallback?.invoke(
+                (completedItems + 1) * 100f / album.items.size,
+                completedBytes,
+                "${completedItems + 1}/${album.items.size}",
+            )
+        }
+        applyAlbumGalleryOrder(album, downloadedPaths)
+        return Result.success(downloadedPaths)
+    }
+
+    private fun applyAlbumGalleryOrder(album: RedditAlbum, paths: List<String>) {
+        val newestTimestamp = System.currentTimeMillis()
+        album.items.zip(paths).forEachIndexed { index, (item, path) ->
+            val timestampMillis = newestTimestamp - (index + 1L) * 1_000L
+            val values =
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.DATE_ADDED, timestampMillis / 1_000L)
+                    put(MediaStore.MediaColumns.DATE_MODIFIED, timestampMillis / 1_000L)
+                    if (item.mimeType.startsWith("video/")) {
+                        put(MediaStore.Video.VideoColumns.DATE_TAKEN, timestampMillis)
+                    } else {
+                        put(MediaStore.Images.ImageColumns.DATE_TAKEN, timestampMillis)
+                    }
+                }
+            val uri = runCatching { Uri.parse(path) }.getOrNull()
+            if (uri?.scheme == "content") {
+                context.contentResolver.update(uri, values, null, null)
+            } else {
+                val file = File(path)
+                if (file.setLastModified(timestampMillis)) {
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(file.absolutePath),
+                        arrayOf(item.mimeType),
+                        null,
+                    )
+                }
+            }
+        }
+    }
 
     suspend fun download(
         media: RedditMedia,
@@ -62,6 +144,9 @@ object RedditMediaDownloader {
                     .build()
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !preferences.privateDirectory) {
+                findCompletedMediaStoreItem(media)?.let { existingUri ->
+                    return Result.success(listOf(existingUri.toString()))
+                }
                 val uri = createPendingMediaStoreItem(media)
                 pendingMediaUri = uri
                 val output =
@@ -109,6 +194,25 @@ object RedditMediaDownloader {
         }
     }
 
+    private fun RedditAlbum.toMedia(item: RedditAlbumItem): RedditMedia =
+        RedditMedia(
+            mediaId = item.mediaId,
+            mediaUrl = item.mediaUrl,
+            mimeType = item.mimeType,
+            extension = item.extension,
+            postId = postId,
+            postTitle = postTitle,
+            author = author,
+            caption = item.caption,
+            sourceUrl = sourceUrl,
+            index = item.index,
+            total = item.total,
+            createdUtc = createdUtc,
+            collectionName = collectionName,
+            collectionIndex = collectionIndex,
+            collectionTotal = collectionTotal,
+        )
+
     private suspend fun streamResponse(
         request: Request,
         media: RedditMedia,
@@ -154,26 +258,61 @@ object RedditMediaDownloader {
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun createPendingMediaStoreItem(media: RedditMedia): Uri {
         val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val relativePath = buildString {
-            append(Environment.DIRECTORY_DOWNLOADS)
-            append("/Seal/Reddit")
-            if (media.total > 1) {
-                append("/${sanitizeFileName(media.postTitle)} [${media.postId}]")
-            }
-            append('/')
-        }
+        context.contentResolver.delete(
+            collection,
+            "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND " +
+                "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND " +
+                "${MediaStore.MediaColumns.IS_PENDING}=1",
+            arrayOf(relativePath(media), orderedFileName(media)),
+        )
         val values =
             ContentValues().apply {
                 val timestampSeconds = orderedTimestampMillis(media) / 1000L
                 put(MediaStore.MediaColumns.DISPLAY_NAME, orderedFileName(media))
                 put(MediaStore.MediaColumns.MIME_TYPE, media.mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath(media))
                 put(MediaStore.MediaColumns.DATE_ADDED, timestampSeconds)
                 put(MediaStore.MediaColumns.DATE_MODIFIED, timestampSeconds)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         return context.contentResolver.insert(collection, values)
             ?: throw IOException("Unable to create ${orderedFileName(media)}")
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun findCompletedMediaStoreItem(media: RedditMedia): Uri? {
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE)
+        val selection =
+            "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND " +
+                "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND " +
+                "${MediaStore.MediaColumns.IS_PENDING}=0"
+        val selectionArgs = arrayOf(relativePath(media), orderedFileName(media))
+        return context.contentResolver
+            .query(
+                collection,
+                projection,
+                selection,
+                selectionArgs,
+                "${MediaStore.MediaColumns._ID} DESC",
+            )
+            ?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                while (cursor.moveToNext()) {
+                    if (cursor.getLong(sizeColumn) > 0L) {
+                        return@use ContentUris.withAppendedId(collection, cursor.getLong(idColumn))
+                    }
+                }
+                null
+            }
+    }
+
+    private fun relativePath(media: RedditMedia): String = buildString {
+        append(Environment.DIRECTORY_DOWNLOADS)
+        append("/Seal/Reddit")
+        appendRedditDirectories(media)
+        append('/')
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -264,12 +403,39 @@ object RedditMediaDownloader {
         val root =
             File(if (preferences.privateDirectory) App.privateDownloadDir else videoDownloadDir)
         val redditRoot = File(root, "Reddit")
-        val directory =
-            if (media.total > 1) {
-                File(redditRoot, "${sanitizeFileName(media.postTitle)} [${media.postId}]")
-            } else {
-                redditRoot
-            }
+        val directory = targetDirectory(redditRoot, media)
         return File(directory, orderedFileName(media))
+    }
+
+    private fun targetDirectory(redditRoot: File, media: RedditMedia): File {
+        val collectionName = media.collectionName?.takeIf(String::isNotBlank)
+        if (collectionName != null) {
+            val collectionRoot = File(redditRoot, sanitizeFileName(collectionName))
+            return File(collectionRoot, orderedPostDirectoryName(media))
+        }
+        return if (media.total > 1) {
+            File(redditRoot, "${sanitizeFileName(media.postTitle)} [${media.postId}]")
+        } else {
+            redditRoot
+        }
+    }
+
+    private fun StringBuilder.appendRedditDirectories(media: RedditMedia) {
+        val collectionName = media.collectionName?.takeIf(String::isNotBlank)
+        if (collectionName != null) {
+            append('/')
+            append(sanitizeFileName(collectionName))
+            append('/')
+            append(orderedPostDirectoryName(media))
+        } else if (media.total > 1) {
+            append("/${sanitizeFileName(media.postTitle)} [${media.postId}]")
+        }
+    }
+
+    internal fun orderedPostDirectoryName(media: RedditMedia): String {
+        val width = media.collectionTotal.toString().length.coerceAtLeast(2)
+        val index = media.collectionIndex.coerceAtLeast(1)
+        return "%0${width}d - %s [%s]"
+            .format(index, sanitizeFileName(media.postTitle), media.postId)
     }
 }

@@ -279,7 +279,7 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
         check(downloadState == Idle)
         if (type is TypeInfo.CustomCommand) {
             execute()
-        } else if (type is TypeInfo.RedditMedia) {
+        } else if (type is TypeInfo.RedditMedia || type is TypeInfo.RedditAlbum) {
             downloadState = ReadyWithInfo
         } else {
             fetchInfo()
@@ -339,8 +339,8 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
 
     private fun Task.download() {
         check(downloadState == ReadyWithInfo)
-        if (type is TypeInfo.RedditMedia) {
-            downloadRedditMedia(type)
+        if (type is TypeInfo.RedditMedia || type is TypeInfo.RedditAlbum) {
+            downloadReddit(type)
             return
         }
         check(info != null)
@@ -390,7 +390,14 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
                         val update =
                             queueState.update(task) { current ->
                                 if (current.downloadState !is Running) current
-                                else current.copy(downloadState = Completed(pathList.firstOrNull()))
+                                else
+                                    current.copy(
+                                        downloadState =
+                                            Completed(
+                                                filePath = pathList.firstOrNull(),
+                                                filePaths = pathList,
+                                            )
+                                    )
                             }
                         if (update?.previous?.downloadState !is Running) return@onSuccess
 
@@ -443,45 +450,69 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
         job.start()
     }
 
-    private fun Task.downloadRedditMedia(media: TypeInfo.RedditMedia) {
+    private fun Task.downloadReddit(typeInfo: TypeInfo) {
         val task = this
         val job =
             scope.launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
-                RedditMediaDownloader.download(
-                        media = media,
-                        preferences = preferences,
-                        progressCallback = { progressPercentage, _, text ->
-                            val progress =
-                                if (progressPercentage < 0f) -1f else progressPercentage / 100f
-                            val update =
-                                queueState.update(task) { current ->
-                                    val preState = current.downloadState
-                                    if (preState !is Running) current
-                                    else
-                                        current.copy(
-                                            downloadState =
-                                                preState.copy(
-                                                    progress = progress,
-                                                    progressText = text,
-                                                )
-                                        )
-                                }
-                            if (update?.previous?.downloadState is Running) {
-                                NotificationUtil.notifyProgress(
-                                    notificationId = notificationId,
-                                    progress = progressPercentage.coerceAtLeast(0f).toInt(),
-                                    text = text,
-                                    title = update.previous.viewState.title,
-                                    taskId = id,
-                                )
+                val progressCallback =
+                    { progressPercentage: Float, downloadedBytes: Long, text: String ->
+                        val progress =
+                            if (progressPercentage < 0f) -1f else progressPercentage / 100f
+                        val update =
+                            queueState.update(task) { current ->
+                                val preState = current.downloadState
+                                if (preState !is Running) current
+                                else
+                                    current.copy(
+                                        downloadState =
+                                            preState.copy(progress = progress, progressText = text),
+                                        viewState =
+                                            current.viewState.copy(
+                                                fileSizeApprox = downloadedBytes.toDouble()
+                                            ),
+                                    )
                             }
-                        },
-                    )
+                        if (update?.previous?.downloadState is Running) {
+                            NotificationUtil.notifyProgress(
+                                notificationId = notificationId,
+                                progress = progressPercentage.coerceAtLeast(0f).toInt(),
+                                text = text,
+                                title = update.previous.viewState.title,
+                                taskId = id,
+                            )
+                        }
+                    }
+                val result =
+                    when (typeInfo) {
+                        is TypeInfo.RedditAlbum ->
+                            RedditMediaDownloader.downloadAlbum(
+                                album = typeInfo,
+                                preferences = preferences,
+                                progressCallback = progressCallback,
+                            )
+
+                        is TypeInfo.RedditMedia ->
+                            RedditMediaDownloader.download(
+                                media = typeInfo,
+                                preferences = preferences,
+                                progressCallback = progressCallback,
+                            )
+
+                        else -> error("Unsupported Reddit task type")
+                    }
+                result
                     .onSuccess { pathList ->
                         val update =
                             queueState.update(task) { current ->
                                 if (current.downloadState !is Running) current
-                                else current.copy(downloadState = Completed(pathList.firstOrNull()))
+                                else
+                                    current.copy(
+                                        downloadState =
+                                            Completed(
+                                                filePath = pathList.firstOrNull(),
+                                                filePaths = pathList,
+                                            )
+                                    )
                             }
                         if (update?.previous?.downloadState !is Running) return@onSuccess
                         FileUtil.createIntentForOpeningFile(pathList.firstOrNull()).run {

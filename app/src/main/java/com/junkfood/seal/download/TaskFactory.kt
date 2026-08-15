@@ -12,15 +12,20 @@ import com.junkfood.seal.util.VideoInfo
 import kotlin.math.roundToInt
 
 object TaskFactory {
+    data class RedditCollection(val name: String, val index: Int, val total: Int)
+
     @CheckResult
     fun createFromRedditPost(
         post: RedditMediaResolver.RedditPost,
         preferences: DownloadPreferences,
+        collection: RedditCollection? = null,
     ): List<TaskWithState> {
         if (!post.isDirectMediaPost) {
+            val redditPreferences =
+                preferences.copy(outputTemplate = redditVideoOutputTemplate(post, collection))
             return listOf(
                 TaskWithState(
-                    task = Task(url = post.canonicalUrl, preferences = preferences),
+                    task = Task(url = post.canonicalUrl, preferences = redditPreferences),
                     state =
                         Task.State(
                             downloadState = Idle,
@@ -37,14 +42,60 @@ object TaskFactory {
             )
         }
 
-        return post.media.map { media ->
+        if (post.media.size > 1) {
             val label =
-                if (media.total > 1) {
-                    "%0${media.total.toString().length}d/%d - %s"
-                        .format(media.index, media.total, post.title)
-                } else {
-                    post.title
-                }
+                collectionLabel(
+                    collection = collection,
+                    label = "${post.title} · ${post.media.size}-item album",
+                )
+            val type =
+                Task.TypeInfo.RedditAlbum(
+                    postId = post.id,
+                    postTitle = post.title,
+                    author = post.author,
+                    sourceUrl = post.canonicalUrl,
+                    createdUtc = post.createdUtc,
+                    items =
+                        post.media.map { media ->
+                            Task.TypeInfo.RedditAlbumItem(
+                                mediaId = media.id,
+                                mediaUrl = media.url,
+                                mimeType = media.mimeType,
+                                extension = media.extension,
+                                caption = media.caption,
+                                index = media.index,
+                                total = media.total,
+                            )
+                        },
+                    collectionName = collection?.name,
+                    collectionIndex = collection?.index ?: 0,
+                    collectionTotal = collection?.total ?: 0,
+                )
+            return listOf(
+                TaskWithState(
+                    task = Task(url = post.canonicalUrl, type = type, preferences = preferences),
+                    state =
+                        Task.State(
+                            downloadState = ReadyWithInfo,
+                            videoInfo = null,
+                            viewState =
+                                Task.ViewState(
+                                    url = post.canonicalUrl,
+                                    title = label,
+                                    uploader = post.author,
+                                    extractorKey = "Reddit",
+                                    thumbnailUrl =
+                                        post.media
+                                            .firstOrNull { it.mimeType.startsWith("image/") }
+                                            ?.url,
+                                ),
+                        ),
+                )
+            )
+        }
+
+        return post.media.map { media ->
+            val label = collectionLabel(collection, post.title)
             val type =
                 Task.TypeInfo.RedditMedia(
                     mediaId = media.id,
@@ -59,6 +110,9 @@ object TaskFactory {
                     index = media.index,
                     total = media.total,
                     createdUtc = post.createdUtc,
+                    collectionName = collection?.name,
+                    collectionIndex = collection?.index ?: 0,
+                    collectionTotal = collection?.total ?: 0,
                 )
             val task = Task(url = post.canonicalUrl, type = type, preferences = preferences)
             TaskWithState(
@@ -79,6 +133,48 @@ object TaskFactory {
                     ),
             )
         }
+    }
+
+    private fun collectionLabel(collection: RedditCollection?, label: String): String =
+        collection?.let {
+            "%0${it.total.toString().length}d/%d · %s".format(it.index, it.total, label)
+        } ?: label
+
+    @CheckResult
+    fun createFromRedditFeed(
+        feed: RedditMediaResolver.RedditFeed,
+        preferences: DownloadPreferences,
+    ): List<TaskWithState> {
+        val total = feed.posts.size
+        return feed.posts.flatMapIndexed { index, post ->
+            createFromRedditPost(
+                post = post,
+                preferences = preferences,
+                collection =
+                    RedditCollection(name = feed.target.name, index = index + 1, total = total),
+            )
+        }
+    }
+
+    private fun redditVideoOutputTemplate(
+        post: RedditMediaResolver.RedditPost,
+        collection: RedditCollection?,
+    ): String {
+        val postFolder = buildString {
+            if (collection != null) {
+                val width = collection.total.toString().length.coerceAtLeast(2)
+                append("%0${width}d - ".format(collection.index))
+            }
+            append(RedditMediaDownloader.sanitizeFileName(post.title))
+            append(" [${post.id}]")
+        }
+        return buildList {
+                add("Reddit")
+                collection?.name?.let(RedditMediaDownloader::sanitizeFileName)?.let(::add)
+                add(postFolder)
+                add("%(title)s [%(id)s].%(ext)s")
+            }
+            .joinToString("/")
     }
 
     /**

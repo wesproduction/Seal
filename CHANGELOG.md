@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Download Reddit image posts and galleries in Reddit's declared album order
 - Open Reddit shares directly in Seal and enqueue images, animated GIFs, and videos automatically
 - Sign in to Reddit inside Seal or import a Netscape `cookies.txt` file without developer tools
+- Download accessible media histories from shared subreddit and user-profile links into ordered,
+  feed-named folders after an explicit bulk-download confirmation
+- Preview completed images, ordered Reddit albums, videos, and audio inside the download queue
 
 ### Fixed
 
@@ -31,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot fail with a red error state
 - Restore the queue before accepting cold-start shares so stale backup state cannot overwrite a new
   Reddit download
+- Keep an already-open Seal task visible in Android Recents after a transient Reddit share finishes
+- Represent each Reddit gallery as one queue task with album-wide pause, cancel, retry, and progress
+- Normalize completed album timestamps so Samsung Gallery preserves Reddit's declared image order
+- Sort completed queue entries by their actual finish time with the newest download first
 
 ### Notable changes from v1.13
 

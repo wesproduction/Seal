@@ -94,6 +94,7 @@ fun VideoCardV2(
     viewState: Task.ViewState,
     stateIndicator: @Composable (BoxScope.() -> Unit)? = null,
     actionButton: @Composable (BoxScope.() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
     onButtonClick: () -> Unit,
 ) {
     with(viewState) {
@@ -106,6 +107,7 @@ fun VideoCardV2(
             fileSizeApprox = fileSizeApprox,
             stateIndicator = stateIndicator,
             actionButton = actionButton,
+            onClick = onClick,
             onButtonClick = onButtonClick,
         )
     }
@@ -116,6 +118,7 @@ fun VideoListItem(
     modifier: Modifier = Modifier,
     viewState: Task.ViewState,
     stateIndicator: @Composable (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
     onButtonClick: () -> Unit,
 ) {
     with(viewState) {
@@ -127,6 +130,7 @@ fun VideoListItem(
             duration = duration,
             fileSizeApprox = fileSizeApprox,
             stateIndicator = stateIndicator,
+            onClick = onClick,
             onButtonClick = onButtonClick,
         )
     }
@@ -141,9 +145,23 @@ fun VideoListItem(
     duration: Int = 0,
     fileSizeApprox: Double = .0,
     stateIndicator: @Composable (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
     onButtonClick: () -> Unit,
 ) {
-    Row(modifier = modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
+    Row(
+        modifier =
+            modifier
+                .then(
+                    if (onClick == null) Modifier
+                    else
+                        Modifier.clickable(
+                            onClickLabel = stringResource(R.string.open_file),
+                            onClick = onClick,
+                        )
+                )
+                .height(IntrinsicSize.Min),
+        verticalAlignment = Alignment.Top,
+    ) {
         Box(modifier = Modifier) {
             ListItemImage(modifier = Modifier, thumbnailModel = thumbnailModel)
             VideoInfoLabel(
@@ -229,6 +247,7 @@ fun VideoCardV2(
     fileSizeApprox: Double = .0,
     stateIndicator: @Composable (BoxScope.() -> Unit)? = null,
     actionButton: @Composable (BoxScope.() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
     onButtonClick: () -> Unit,
 ) {
     val containerColor =
@@ -237,7 +256,17 @@ fun VideoCardV2(
         }
 
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .then(
+                    if (onClick == null) Modifier
+                    else
+                        Modifier.clickable(
+                            onClickLabel = stringResource(R.string.open_file),
+                            onClick = onClick,
+                        )
+                ),
         colors = CardDefaults.cardColors(containerColor = containerColor),
     ) {
         Column {

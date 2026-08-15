@@ -5,11 +5,17 @@ import com.junkfood.seal.BuildConfig
 import com.junkfood.seal.util.PreferenceUtil.getString
 import java.io.IOException
 import java.net.URI
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
@@ -19,6 +25,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 object RedditMediaResolver {
+    const val MAX_FEED_POSTS = 1_000
+    private const val FEED_PAGE_SIZE = 100
+    private const val FEED_PAGE_DELAY_MILLIS = 250L
+
     private val redditHosts =
         setOf(
             "reddit.com",
@@ -40,10 +50,42 @@ object RedditMediaResolver {
         val canonicalUrl: String,
         val createdUtc: Long,
         val media: List<MediaItem>,
+        val isVideoPost: Boolean = false,
     ) {
         val isDirectMediaPost: Boolean
             get() = media.isNotEmpty()
+
+        val isDownloadablePost: Boolean
+            get() = isDirectMediaPost || isVideoPost
     }
+
+    enum class FeedKind {
+        Subreddit,
+        User,
+    }
+
+    data class FeedTarget(val kind: FeedKind, val name: String, val canonicalUrl: String) {
+        val displayName: String
+            get() = if (kind == FeedKind.Subreddit) "r/$name" else "u/$name"
+
+        internal val listingPath: String
+            get() = if (kind == FeedKind.Subreddit) "r/$name/new" else "user/$name/submitted"
+    }
+
+    data class FeedProgress(
+        val target: FeedTarget,
+        val scannedPosts: Int,
+        val mediaPosts: Int,
+        val mediaItems: Int,
+    )
+
+    data class RedditFeed(
+        val target: FeedTarget,
+        val posts: List<RedditPost>,
+        val scannedPosts: Int,
+    )
+
+    internal data class FeedPage(val posts: List<RedditPost>, val after: String?)
 
     data class MediaItem(
         val id: String,
@@ -57,6 +99,25 @@ object RedditMediaResolver {
 
     fun isRedditUrl(url: String): Boolean =
         runCatching { URI(url).host?.lowercase() in redditHosts }.getOrDefault(false)
+
+    fun extractFeedTarget(url: String): FeedTarget? {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        if (uri.host?.lowercase() !in redditHosts) return null
+        val segments = uri.path.split('/').filter(String::isNotBlank)
+        if (segments.size < 2) return null
+        val root = segments[0].lowercase()
+        val name = segments[1].takeIf { it.matches(Regex("[A-Za-z0-9_-]{1,64}")) } ?: return null
+        val suffix = segments.getOrNull(2)?.lowercase()
+        return when {
+            root == "r" && suffix in setOf(null, "new", "hot", "top", "rising") ->
+                FeedTarget(FeedKind.Subreddit, name, "https://www.reddit.com/r/$name/new/")
+
+            root in setOf("u", "user") && suffix in setOf(null, "submitted", "overview") ->
+                FeedTarget(FeedKind.User, name, "https://www.reddit.com/user/$name/submitted/")
+
+            else -> null
+        }
+    }
 
     suspend fun resolve(sourceUrl: String): RedditPost =
         withContext(Dispatchers.IO) {
@@ -91,6 +152,69 @@ object RedditMediaResolver {
             throw lastFailure ?: IOException("Unable to read Reddit post")
         }
 
+    suspend fun resolveFeed(
+        sourceUrl: String,
+        onProgress: (FeedProgress) -> Unit = {},
+    ): RedditFeed =
+        withContext(Dispatchers.IO) {
+            val target =
+                extractFeedTarget(sourceUrl)
+                    ?: throw IOException("Reddit did not return a subreddit or user profile link")
+            val userAgent = userAgent()
+            val cookieHeader = DownloadUtil.getCookieHeaderFor("https://www.reddit.com/")
+            val posts = mutableListOf<RedditPost>()
+            val seenPostIds = mutableSetOf<String>()
+            val seenAfter = mutableSetOf<String>()
+            var scannedPosts = 0
+            var after: String? = null
+
+            while (scannedPosts < MAX_FEED_POSTS) {
+                coroutineContext.ensureActive()
+                val pageLimit = minOf(FEED_PAGE_SIZE, MAX_FEED_POSTS - scannedPosts)
+                val endpoints =
+                    listOf("www.reddit.com", "old.reddit.com").map { host ->
+                        buildListingEndpoint(host, target, pageLimit, scannedPosts, after)
+                    }
+                var lastFailure: Throwable? = null
+                var page: FeedPage? = null
+                for (endpoint in endpoints) {
+                    try {
+                        page =
+                            parseFeedPage(
+                                requestText(endpoint, target.canonicalUrl, userAgent, cookieHeader),
+                                target,
+                            )
+                        break
+                    } catch (throwable: Throwable) {
+                        lastFailure = throwable
+                    }
+                }
+                val resolvedPage =
+                    page ?: throw lastFailure ?: IOException("Unable to read Reddit listing")
+                if (resolvedPage.posts.isEmpty()) break
+
+                scannedPosts += resolvedPage.posts.size
+                resolvedPage.posts.forEach { post ->
+                    if (post.isDownloadablePost && seenPostIds.add(post.id)) posts += post
+                }
+                onProgress(
+                    FeedProgress(
+                        target = target,
+                        scannedPosts = scannedPosts,
+                        mediaPosts = posts.size,
+                        mediaItems = posts.sumOf { maxOf(1, it.media.size) },
+                    )
+                )
+
+                val nextAfter = resolvedPage.after
+                if (nextAfter.isNullOrBlank() || !seenAfter.add(nextAfter)) break
+                after = nextAfter
+                delay(FEED_PAGE_DELAY_MILLIS)
+            }
+
+            RedditFeed(target = target, posts = posts, scannedPosts = scannedPosts)
+        }
+
     internal fun parsePostJson(content: String, canonicalUrl: String): RedditPost {
         val root = json.parseToJsonElement(content)
         val listing =
@@ -109,6 +233,24 @@ object RedditMediaResolver {
                 ?.get("data")
                 ?.jsonObject ?: error("Reddit post metadata is missing")
 
+        return parsePostObject(post, canonicalUrl)
+    }
+
+    internal fun parseFeedPage(content: String, target: FeedTarget): FeedPage {
+        val listing = json.parseToJsonElement(content).jsonObject
+        val data = listing["data"]?.jsonObject ?: error("Reddit listing metadata is missing")
+        val posts =
+            data["children"]?.jsonArray.orEmpty().mapNotNull { childElement ->
+                val post = childElement.jsonObject["data"]?.jsonObject ?: return@mapNotNull null
+                val canonicalUrl =
+                    post.string("permalink")?.let { "https://www.reddit.com$it" }
+                        ?: target.canonicalUrl
+                parsePostObject(post, canonicalUrl)
+            }
+        return FeedPage(posts = posts, after = data.string("after"))
+    }
+
+    private fun parsePostObject(post: JsonObject, canonicalUrl: String): RedditPost {
         val mediaPost = post["crosspost_parent_list"]?.jsonArray?.lastOrNull()?.jsonObject ?: post
         val id = post.string("id") ?: extractPostId(canonicalUrl) ?: "reddit"
         val title = post.string("title").orEmpty().ifBlank { "Reddit $id" }
@@ -134,6 +276,7 @@ object RedditMediaResolver {
             canonicalUrl = canonicalUrl,
             createdUtc = createdUtc,
             media = finalizedMedia,
+            isVideoPost = post.isVideoPost() || mediaPost.isVideoPost(),
         )
     }
 
@@ -162,7 +305,7 @@ object RedditMediaResolver {
     }
 
     private fun parseSingleOrEmbeddedMedia(post: JsonObject): List<MediaItem> {
-        val postUrl = post.string("url")
+        val postUrl = post.string("url_overridden_by_dest") ?: post.string("url")
         if (postUrl.isRedditImageUrl()) {
             return listOf(
                 MediaItem(
@@ -243,6 +386,34 @@ object RedditMediaResolver {
             .header("Referer", referer)
             .apply { if (cookies.isNotBlank()) header("Cookie", cookies) }
 
+    private fun userAgent(): String =
+        USER_AGENT_STRING.getString().ifBlank {
+            System.getProperty("http.agent")
+                ?: "Seal/${BuildConfig.VERSION_NAME} Android/${Build.VERSION.RELEASE}"
+        }
+
+    private fun buildListingEndpoint(
+        host: String,
+        target: FeedTarget,
+        limit: Int,
+        count: Int,
+        after: String?,
+    ): String = buildString {
+        append("https://")
+        append(host)
+        append('/')
+        append(target.listingPath)
+        append(".json?raw_json=1&limit=")
+        append(limit)
+        append("&count=")
+        append(count)
+        append("&show=all")
+        if (!after.isNullOrBlank()) {
+            append("&after=")
+            append(URLEncoder.encode(after, StandardCharsets.UTF_8.name()))
+        }
+    }
+
     private fun redditHttpError(code: Int): IOException =
         if (code == 401 || code == 403) {
             IOException(
@@ -253,6 +424,15 @@ object RedditMediaResolver {
         }
 
     private fun JsonObject.string(key: String): String? = get(key)?.jsonPrimitive?.contentOrNull
+
+    private fun JsonObject.isVideoPost(): Boolean {
+        if (get("is_video")?.jsonPrimitive?.booleanOrNull == true) return true
+        if (string("post_hint") in setOf("hosted:video", "rich:video")) return true
+        return listOf("secure_media", "media").any { mediaKey ->
+            get(mediaKey)?.let { runCatching { it.jsonObject }.getOrNull() }?.get("reddit_video") !=
+                null
+        }
+    }
 
     private fun String?.isRedditImageUrl(): Boolean {
         val host = this?.let { runCatching { URI(it).host?.lowercase() }.getOrNull() }

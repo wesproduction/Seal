@@ -5,6 +5,8 @@ import com.junkfood.seal.download.TaskFactory
 import com.junkfood.seal.ui.page.settings.network.Cookie
 import com.junkfood.seal.ui.page.settings.network.toCookieHeader
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,13 +24,10 @@ class RedditMediaResolverTest {
         assertEquals("https://i.redd.it/second.jpg", post.media[0].url)
 
         val tasks = TaskFactory.createFromRedditPost(post, DownloadUtil.DownloadPreferences.EMPTY)
-        assertEquals(
-            listOf("second", "first"),
-            tasks.map { (it.task.type as Task.TypeInfo.RedditMedia).mediaId },
-        )
-        assertTrue(
-            tasks.all { (it.task.type as Task.TypeInfo.RedditMedia).mimeType.startsWith("image/") }
-        )
+        assertEquals(1, tasks.size)
+        val album = tasks.single().task.type as Task.TypeInfo.RedditAlbum
+        assertEquals(listOf("second", "first"), album.items.map { it.mediaId })
+        assertTrue(album.items.all { it.mimeType.startsWith("image/") })
     }
 
     @Test
@@ -40,6 +39,53 @@ class RedditMediaResolverTest {
                 "https://old.reddit.com/r/pics/comments/abc123/example/"
             ),
         )
+        assertNull(
+            RedditMediaResolver.extractFeedTarget(
+                "https://www.reddit.com/r/pics/comments/abc123/example/"
+            )
+        )
+        assertNull(
+            RedditMediaResolver.extractFeedTarget("https://www.reddit.com/r/pics/s/AbCdEf1234")
+        )
+        assertEquals(
+            RedditMediaResolver.FeedKind.Subreddit,
+            RedditMediaResolver.extractFeedTarget("https://www.reddit.com/r/pics/")?.kind,
+        )
+        assertEquals(
+            "Example_User",
+            RedditMediaResolver.extractFeedTarget(
+                    "https://www.reddit.com/user/Example_User/submitted/"
+                )
+                ?.name,
+        )
+    }
+
+    @Test
+    fun feedPagePreservesNewestFirstPostAndGalleryOrder() {
+        val target =
+            requireNotNull(RedditMediaResolver.extractFeedTarget("https://www.reddit.com/r/pics/"))
+        val page = RedditMediaResolver.parseFeedPage(FEED_JSON, target)
+
+        assertEquals("t3_next", page.after)
+        assertEquals(listOf("gallery1", "video1", "text1"), page.posts.map { it.id })
+        assertEquals(listOf("second", "first"), page.posts.first().media.map { it.id })
+        assertTrue(page.posts[1].isVideoPost)
+        assertFalse(page.posts[2].isDownloadablePost)
+
+        val feed =
+            RedditMediaResolver.RedditFeed(
+                target = target,
+                posts = page.posts.filter { it.isDownloadablePost },
+                scannedPosts = page.posts.size,
+            )
+        val tasks = TaskFactory.createFromRedditFeed(feed, DownloadUtil.DownloadPreferences.EMPTY)
+        assertEquals(2, tasks.size)
+        val galleryAlbum = tasks.first().task.type as Task.TypeInfo.RedditAlbum
+        assertEquals(listOf("second", "first"), galleryAlbum.items.map { it.mediaId })
+        assertEquals("pics", galleryAlbum.collectionName)
+        assertEquals(1, galleryAlbum.collectionIndex)
+        assertEquals(2, galleryAlbum.collectionTotal)
+        assertTrue(tasks.last().task.preferences.outputTemplate.startsWith("Reddit/pics/02 - "))
     }
 
     @Test
@@ -92,6 +138,67 @@ class RedditMediaResolverTest {
                 }
               }
             ]
+            """
+                .trimIndent()
+
+        val FEED_JSON =
+            """
+            {
+              "data": {
+                "after": "t3_next",
+                "children": [
+                  {
+                    "data": {
+                      "id": "gallery1",
+                      "title": "Newest gallery",
+                      "author": "tester",
+                      "created_utc": 1700000300,
+                      "permalink": "/r/pics/comments/gallery1/newest_gallery/",
+                      "url": "https://www.reddit.com/gallery/gallery1",
+                      "gallery_data": {
+                        "items": [
+                          {"media_id": "second"},
+                          {"media_id": "first"}
+                        ]
+                      },
+                      "media_metadata": {
+                        "first": {
+                          "status": "valid",
+                          "m": "image/png",
+                          "s": {"u": "https://preview.redd.it/first.png"}
+                        },
+                        "second": {
+                          "status": "valid",
+                          "m": "image/jpeg",
+                          "s": {"u": "https://preview.redd.it/second.jpg"}
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "data": {
+                      "id": "video1",
+                      "title": "Native video",
+                      "author": "tester",
+                      "created_utc": 1700000200,
+                      "permalink": "/r/pics/comments/video1/native_video/",
+                      "is_video": true,
+                      "post_hint": "hosted:video"
+                    }
+                  },
+                  {
+                    "data": {
+                      "id": "text1",
+                      "title": "Text only",
+                      "author": "tester",
+                      "created_utc": 1700000100,
+                      "permalink": "/r/pics/comments/text1/text_only/",
+                      "is_self": true
+                    }
+                  }
+                ]
+              }
+            }
             """
                 .trimIndent()
     }

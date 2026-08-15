@@ -1,12 +1,15 @@
 package com.junkfood.seal
 
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,5 +60,14 @@ class ExampleInstrumentedTest {
                     it.activityInfo.name == QuickDownloadActivity::class.java.name
             }
         )
+
+        val activityInfo =
+            appContext.packageManager.getActivityInfo(
+                ComponentName(appContext, QuickDownloadActivity::class.java),
+                0,
+            )
+        assertEquals(ActivityInfo.LAUNCH_MULTIPLE, activityInfo.launchMode)
+        assertNull(activityInfo.taskAffinity)
+        assertTrue(activityInfo.flags and ActivityInfo.FLAG_EXCLUDE_FROM_RECENTS != 0)
     }
 }

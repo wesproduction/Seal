@@ -1,10 +1,14 @@
 package com.junkfood.seal.download
 
 import com.junkfood.seal.download.Task.DownloadState.Canceled
+import com.junkfood.seal.download.Task.DownloadState.Completed
 import com.junkfood.seal.download.Task.DownloadState.Running
 import com.junkfood.seal.download.Task.RestartableAction.Download
 import com.junkfood.seal.util.DownloadUtil
 import kotlinx.coroutines.Job
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
@@ -46,5 +50,67 @@ class TaskQueueStateStoreTest {
         }
 
         assertTrue(store.state.value.getValue(task).downloadState is Canceled)
+    }
+
+    @Test
+    fun redditAlbumSurvivesQueueBackupSerialization() {
+        val albumTask =
+            Task(
+                url = "https://www.reddit.com/gallery/album",
+                type =
+                    Task.TypeInfo.RedditAlbum(
+                        postId = "album",
+                        postTitle = "Album",
+                        author = "author",
+                        sourceUrl = "https://www.reddit.com/gallery/album",
+                        createdUtc = 123L,
+                        items =
+                            listOf(
+                                Task.TypeInfo.RedditAlbumItem(
+                                    mediaId = "one",
+                                    mediaUrl = "https://i.redd.it/one.jpg",
+                                    mimeType = "image/jpeg",
+                                    extension = "jpg",
+                                    caption = "First",
+                                    index = 1,
+                                    total = 2,
+                                ),
+                                Task.TypeInfo.RedditAlbumItem(
+                                    mediaId = "two",
+                                    mediaUrl = "https://i.redd.it/two.jpg",
+                                    mimeType = "image/jpeg",
+                                    extension = "jpg",
+                                    caption = "Second",
+                                    index = 2,
+                                    total = 2,
+                                ),
+                            ),
+                    ),
+                preferences = DownloadUtil.DownloadPreferences.EMPTY,
+            )
+
+        val restored = Json.decodeFromString<Task>(Json.encodeToString(albumTask))
+        val restoredAlbum = restored.type as Task.TypeInfo.RedditAlbum
+
+        assertEquals(listOf("one", "two"), restoredAlbum.items.map { it.mediaId })
+        assertEquals(albumTask.id, restored.id)
+    }
+
+    @Test
+    fun completedAlbumKeepsItsOrderedPathsAndCompletionTimeWhenSerialized() {
+        val completed =
+            Completed(
+                filePath = "content://media/one.jpg",
+                filePaths = listOf("content://media/one.jpg", "content://media/two.jpg"),
+                completedAt = 456L,
+            )
+
+        val restored =
+            Json.decodeFromString<Task.DownloadState>(
+                Json.encodeToString<Task.DownloadState>(completed)
+            ) as Completed
+
+        assertEquals(completed.filePaths, restored.orderedFilePaths)
+        assertEquals(456L, restored.completedAt)
     }
 }
