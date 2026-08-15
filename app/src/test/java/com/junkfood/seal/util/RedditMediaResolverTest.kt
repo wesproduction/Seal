@@ -85,7 +85,24 @@ class RedditMediaResolverTest {
         assertEquals("pics", galleryAlbum.collectionName)
         assertEquals(1, galleryAlbum.collectionIndex)
         assertEquals(2, galleryAlbum.collectionTotal)
-        assertTrue(tasks.last().task.preferences.outputTemplate.startsWith("Reddit/pics/02 - "))
+        assertEquals(
+            "Reddit/pics/02 - Native video [video1].%(ext)s",
+            tasks.last().task.preferences.outputTemplate,
+        )
+
+        val separateTasks =
+            TaskFactory.createFromRedditFeed(
+                feed,
+                DownloadUtil.DownloadPreferences.EMPTY.copy(redditSeparatePostFolders = true),
+            )
+        assertTrue(
+            separateTasks
+                .last()
+                .task
+                .preferences
+                .outputTemplate
+                .startsWith("Reddit/pics/02 - Native video [video1]/")
+        )
     }
 
     @Test

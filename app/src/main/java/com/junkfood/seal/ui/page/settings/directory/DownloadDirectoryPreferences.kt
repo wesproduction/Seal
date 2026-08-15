@@ -105,6 +105,7 @@ import com.junkfood.seal.util.PreferenceUtil.getBoolean
 import com.junkfood.seal.util.PreferenceUtil.getString
 import com.junkfood.seal.util.PreferenceUtil.updateBoolean
 import com.junkfood.seal.util.PreferenceUtil.updateString
+import com.junkfood.seal.util.REDDIT_SEPARATE_POST_FOLDERS
 import com.junkfood.seal.util.RESTRICT_FILENAMES
 import com.junkfood.seal.util.SDCARD_DOWNLOAD
 import com.junkfood.seal.util.SDCARD_URI
@@ -337,6 +338,18 @@ fun DownloadDirectoryPreferences(onNavigateBack: () -> Unit) {
                     enabled = !isCustomCommandEnabled && !sdcardDownload,
                 ) {
                     showSubdirectoryDialog = true
+                }
+            }
+            item {
+                var separateRedditPostFolders by REDDIT_SEPARATE_POST_FOLDERS.booleanState
+                PreferenceSwitch(
+                    title = stringResource(id = R.string.reddit_separate_post_folders),
+                    description = stringResource(id = R.string.reddit_separate_post_folders_desc),
+                    icon = Icons.Outlined.SnippetFolder,
+                    isChecked = separateRedditPostFolders,
+                ) {
+                    separateRedditPostFolders = !separateRedditPostFolders
+                    REDDIT_SEPARATE_POST_FOLDERS.updateBoolean(separateRedditPostFolders)
                 }
             }
             item { PreferenceSubtitle(text = stringResource(R.string.privacy)) }

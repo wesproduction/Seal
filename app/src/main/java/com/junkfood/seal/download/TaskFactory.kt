@@ -22,7 +22,14 @@ object TaskFactory {
     ): List<TaskWithState> {
         if (!post.isDirectMediaPost) {
             val redditPreferences =
-                preferences.copy(outputTemplate = redditVideoOutputTemplate(post, collection))
+                preferences.copy(
+                    outputTemplate =
+                        redditVideoOutputTemplate(
+                            post = post,
+                            collection = collection,
+                            separatePostFolders = preferences.redditSeparatePostFolders,
+                        )
+                )
             return listOf(
                 TaskWithState(
                     task = Task(url = post.canonicalUrl, preferences = redditPreferences),
@@ -159,6 +166,7 @@ object TaskFactory {
     private fun redditVideoOutputTemplate(
         post: RedditMediaResolver.RedditPost,
         collection: RedditCollection?,
+        separatePostFolders: Boolean,
     ): String {
         val postFolder = buildString {
             if (collection != null) {
@@ -171,8 +179,12 @@ object TaskFactory {
         return buildList {
                 add("Reddit")
                 collection?.name?.let(RedditMediaDownloader::sanitizeFileName)?.let(::add)
-                add(postFolder)
-                add("%(title)s [%(id)s].%(ext)s")
+                if (separatePostFolders) {
+                    add(postFolder)
+                    add("%(title)s [%(id)s].%(ext)s")
+                } else {
+                    add("$postFolder.%(ext)s")
+                }
             }
             .joinToString("/")
     }

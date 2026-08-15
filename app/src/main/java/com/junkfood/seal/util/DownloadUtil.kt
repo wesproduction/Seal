@@ -251,6 +251,7 @@ object DownloadUtil {
         val forceIpv4: Boolean,
         val mergeAudioStream: Boolean,
         val mergeToMkv: Boolean,
+        val redditSeparatePostFolders: Boolean = false,
     ) {
         companion object {
             val EMPTY =
@@ -305,6 +306,7 @@ object DownloadUtil {
                     forceIpv4 = false,
                     mergeAudioStream = false,
                     mergeToMkv = false,
+                    redditSeparatePostFolders = false,
                     useCustomAudioPreset = false,
                 )
 
@@ -365,6 +367,7 @@ object DownloadUtil {
                     mergeAudioStream = false,
                     mergeToMkv =
                         (downloadSubtitle && embedSubtitle) || MERGE_OUTPUT_MKV.getBoolean(),
+                    redditSeparatePostFolders = REDDIT_SEPARATE_POST_FOLDERS.getBoolean(),
                 )
             }
         }
