@@ -164,30 +164,7 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
     }
 
     private fun enqueueFromBackup() {
-        val taskList =
-            PreferenceUtil.decodeTaskListBackup()
-                .filter { it.value.downloadState !is Completed }
-                .mapValues { (_, state) ->
-                    val preState = state.downloadState
-                    val downloadState =
-                        when (preState) {
-                            is FetchingInfo,
-                            Idle -> {
-                                Canceled(action = FetchInfo)
-                            }
-                            is Running -> {
-                                Canceled(action = Download, progress = preState.progress)
-                            }
-
-                            ReadyWithInfo -> {
-                                Canceled(action = Download, progress = null)
-                            }
-                            else -> {
-                                preState
-                            }
-                        }
-                    state.copy(downloadState = downloadState)
-                }
+        val taskList = PreferenceUtil.decodeTaskListBackup().restoredAfterRestart()
         taskList.forEach(::enqueue)
     }
 
@@ -200,18 +177,7 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
      * keeps crash recovery current without writing preferences for every yt-dlp progress line.
      */
     private fun Map<Task, Task.State>.toBackupSnapshot(): Map<Task, Task.State> =
-        filter { (_, state) -> state.downloadState !is Completed }
-            .mapValues { (_, state) ->
-                val downloadState = state.downloadState
-                if (downloadState !is Running || downloadState.progress < 0f) state
-                else {
-                    val persistedProgress = (downloadState.progress * 20).roundToInt() / 20f
-                    state.copy(
-                        downloadState =
-                            downloadState.copy(progress = persistedProgress, progressText = "")
-                    )
-                }
-            }
+        persistentQueueSnapshot()
 
     override fun enqueue(task: Task) {
         queueState.put(
@@ -714,3 +680,29 @@ private val DownloadState.phase: QueuePhase
             is Error -> QueuePhase.Restartable
             is Completed -> QueuePhase.Completed
         }
+
+internal fun Map<Task, Task.State>.restoredAfterRestart(): Map<Task, Task.State> =
+    mapValues { (_, state) ->
+        val previousState = state.downloadState
+        val restoredState =
+            when (previousState) {
+                is FetchingInfo,
+                Idle -> Canceled(action = FetchInfo)
+                is Running -> Canceled(action = Download, progress = previousState.progress)
+                ReadyWithInfo -> Canceled(action = Download, progress = null)
+                else -> previousState
+            }
+        state.copy(downloadState = restoredState)
+    }
+
+internal fun Map<Task, Task.State>.persistentQueueSnapshot(): Map<Task, Task.State> =
+    mapValues { (_, state) ->
+        val downloadState = state.downloadState
+        if (downloadState !is Running || downloadState.progress < 0f) state
+        else {
+            val persistedProgress = (downloadState.progress * 20).roundToInt() / 20f
+            state.copy(
+                downloadState = downloadState.copy(progress = persistedProgress, progressText = "")
+            )
+        }
+    }

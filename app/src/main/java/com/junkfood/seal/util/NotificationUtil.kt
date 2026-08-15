@@ -40,9 +40,10 @@ object NotificationUtil {
     private lateinit var serviceNotification: Notification
 
     //    private var builder =
-    //        NotificationCompat.Builder(context, CHANNEL_ID).setSmallIcon(R.drawable.ic_stat_seal)
+    //        NotificationCompat.Builder(context,
+    // CHANNEL_ID).setSmallIcon(R.drawable.ic_stat_walrus)
     private val commandNotificationBuilder =
-        NotificationCompat.Builder(context, CHANNEL_ID).setSmallIcon(R.drawable.ic_stat_seal)
+        NotificationCompat.Builder(context, CHANNEL_ID).setSmallIcon(R.drawable.ic_stat_walrus)
 
     @RequiresApi(Build.VERSION_CODES.O)
     fun createNotificationChannel() {
@@ -91,7 +92,7 @@ object NotificationUtil {
             }
 
         NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_seal)
+            .setSmallIcon(R.drawable.ic_stat_walrus)
             .setContentTitle(title)
             .setProgress(PROGRESS_MAX, progress, progress <= 0)
             .setOngoing(true)
@@ -117,7 +118,7 @@ object NotificationUtil {
 
         val builder =
             NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_stat_seal)
+                .setSmallIcon(R.drawable.ic_stat_walrus)
                 .setContentText(text)
                 .setOngoing(false)
                 .setAutoCancel(true)
@@ -134,7 +135,7 @@ object NotificationUtil {
         //        notificationManager.cancel(notificationId)
         val builder =
             NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_stat_seal)
+                .setSmallIcon(R.drawable.ic_stat_walrus)
                 .setContentText(text)
                 .setProgress(0, 0, false)
                 .setAutoCancel(true)
@@ -148,7 +149,7 @@ object NotificationUtil {
     fun makeServiceNotification(intent: PendingIntent, text: String? = null): Notification {
         serviceNotification =
             NotificationCompat.Builder(context, SERVICE_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_stat_seal)
+                .setSmallIcon(R.drawable.ic_stat_walrus)
                 .setContentTitle(context.getString(R.string.service_title))
                 .setContentText(text)
                 .setOngoing(true)
@@ -195,7 +196,7 @@ object NotificationUtil {
                     PendingIntent.FLAG_UPDATE_CURRENT,
             )
         NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_seal)
+            .setSmallIcon(R.drawable.ic_stat_walrus)
             .setContentTitle(title)
             .setContentText(context.getString(textId))
             .setOngoing(false)
@@ -235,7 +236,7 @@ object NotificationUtil {
             )
 
         NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_seal)
+            .setSmallIcon(R.drawable.ic_stat_walrus)
             .setContentTitle(
                 "[${templateName}_${taskUrl}] " +
                     context.getString(R.string.execute_command_notification)

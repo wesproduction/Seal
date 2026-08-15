@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">Seal</string>
+    <string name="app_name" translatable="false">Walrus Downloader</string>
     <string name="video_directory">Video folder</string>
     <string name="extract_audio">Save as audio</string>
     <string name="create_thumbnail">Save thumbnail</string>
@@ -130,12 +130,12 @@
     <string name="subdirectory">Save to subdirectory</string>
     <string name="subdirectory_desc">Save files in folders named as respective fields</string>
     <string name="reddit_separate_post_folders">Separate Reddit post folders</string>
-    <string name="reddit_separate_post_folders_desc">Off groups direct shares in Seal Reddit and bulk downloads by source. On makes every post a separate Samsung Gallery album.</string>
+    <string name="reddit_separate_post_folders_desc">Off groups direct shares in Walrus Reddit and bulk downloads by source. On makes every post a separate Samsung Gallery album.</string>
     <string name="permission_issue">Storage permission issue</string>
     <string name="permission_issue_desc">Directories outside Download/ and Documents/ are not supported</string>
     <string name="battery_configuration">Battery configuration</string>
     <string name="battery_configuration_desc">Ignore battery optimization for this app to download in the background</string>
-    <string name="service_title">Seal is downloading…</string>
+    <string name="service_title">Walrus Downloader is downloading…</string>
     <string name="unknown_error">Unknown error</string>
     <string name="translate">Translate</string>
     <string name="translate_desc">Help translate this app on Hosted Weblate</string>
@@ -198,7 +198,7 @@
     <string name="reddit_reading_post">Reading the post and preserving its media order…</string>
     <string name="reddit_download_error">Couldn’t read this Reddit link</string>
     <string name="reddit_feed_confirm_title">Download all media from %1$s?</string>
-    <string name="reddit_feed_confirm_desc">Seal will scan up to %1$d accessible posts, newest first, and queue every image, gallery, and video it can find. Files will be ordered under Reddit/%2$s. Reddit may limit older history. This can use substantial time, data, and storage.</string>
+    <string name="reddit_feed_confirm_desc">Walrus Downloader will scan up to %1$d accessible posts, newest first, and queue every image, gallery, and video it can find. Files will be ordered under Walrus Reddit/%2$s. Reddit may limit older history. This can use substantial time, data, and storage.</string>
     <string name="reddit_feed_download_all">Download all</string>
     <string name="reddit_feed_scanning_title">Scanning %1$s</string>
     <string name="reddit_feed_scanning_desc">Scanned %1$d of up to %2$d posts. Found %3$d media posts containing %4$d download items.</string>
@@ -255,7 +255,7 @@
     <string name="custom_command_enabled_hint">Some options are unavailable when using custom command</string>
     <string name="how_does_it_work">How does it work?</string>
     <string name="cookies_usage_msg">Downloading from some sites requires account authentication information. Click \"Generate new cookies\", enter the URL of the website and then log in with your account in the browser page, the app will generate it for you.</string>
-    <string name="custom_command_usage_msg">yt-dlp is a powerful command-line tool for downloading videos. Seal makes it easier to use yt-dlp by providing an intuitive GUI, presets for common commands, and other additional features.\n\nFor advanced usage of yt-dlp, Seal allows you to create, save and execute custom command templates directly, just like in a terminal.\n\nWhen using custom commands, most of the GUI options and features would be disabled.</string>
+    <string name="custom_command_usage_msg">yt-dlp is a powerful command-line tool for downloading videos. Walrus Downloader makes it easier to use yt-dlp by providing an intuitive GUI, presets for common commands, and other additional features.\n\nFor advanced usage of yt-dlp, Walrus Downloader allows you to create, save and execute custom command templates directly, just like in a terminal.\n\nWhen using custom commands, most of the GUI options and features would be disabled.</string>
     <string name="telegram_channel">Telegram channel</string>
     <string name="matrix_space">Matrix space</string>
     <string name="sdcard_directory">SD card folder</string>
@@ -311,7 +311,7 @@
     <string name="temporary_directory_desc">Store temporary files in the internal directory</string>
     <string name="sponsor">Sponsor</string>
     <string name="sponsor_desc">Support this app by sponsoring on GitHub</string>
-    <string name="sponsor_msg">Seal will be always free and open source for everyone. If you like it, please consider sponsoring me on GitHub!</string>
+    <string name="sponsor_msg">Walrus Downloader will always be free and open source. If you like the upstream project it is based on, please consider supporting its developer on GitHub!</string>
     <string name="feedback">Feedback</string>
     <string name="sponsors">Sponsors</string>
     <string name="audio_format">Audio format</string>
@@ -322,7 +322,7 @@
     <string name="clip_video_desc">Make video clips in the format selection page</string>
     <string name="embed_thumbnail" translatable="false">Embed thumbnail</string>
     <string name="embed_thumbnail_desc" translatable="false">Embed thumbnails into videos</string>
-    <string name="auto_update_disabled_msg">Auto-update is not available for %1$s builds. If you don\'t have %1$s installed on your device, or would like to preview upcoming new features in Seal, please consider %2$s.</string>
+    <string name="auto_update_disabled_msg">Auto-update is not available for %1$s builds. If you don\'t have %1$s installed on your device, or would like to preview upcoming Walrus Downloader features, please consider %2$s.</string>
     <string name="switch_to_github_builds">switching to GitHub builds</string>
     <string name="okay">Okay</string>
     <string name="got_it">Got it</string>

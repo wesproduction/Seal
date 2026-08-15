@@ -11,6 +11,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -112,5 +113,41 @@ class TaskQueueStateStoreTest {
 
         assertEquals(completed.filePaths, restored.orderedFilePaths)
         assertEquals(456L, restored.completedAt)
+    }
+
+    @Test
+    fun completedDownloadsSurvivePersistentQueueBackupAndRestart() {
+        val completed =
+            Completed(
+                filePath = "content://media/one.jpg",
+                filePaths = listOf("content://media/one.jpg", "content://media/two.jpg"),
+                completedAt = 456L,
+            )
+        val state = Task.State(completed, null, Task.ViewState(title = "Saved album"))
+
+        val persisted = mapOf(task to state).persistentQueueSnapshot()
+        val backupJson = Json { allowStructuredMapKeys = true }
+        val encoded = backupJson.encodeToString(persisted)
+        val decoded = backupJson.decodeFromString<Map<Task, Task.State>>(encoded)
+        val restored = decoded.restoredAfterRestart().getValue(task).downloadState
+
+        assertTrue(restored is Completed)
+        restored as Completed
+        assertEquals(completed.filePaths, restored.orderedFilePaths)
+        assertEquals(456L, restored.completedAt)
+    }
+
+    @Test
+    fun interruptedDownloadBecomesCanceledButIsNotForgotten() {
+        val running = Running(Job(), task.id, progress = 0.43f, progressText = "43%")
+        val state = Task.State(running, null, Task.ViewState(title = "Video"))
+
+        val persisted = mapOf(task to state).persistentQueueSnapshot()
+        val restored = persisted.restoredAfterRestart().getValue(task).downloadState
+
+        assertTrue(restored is Canceled)
+        restored as Canceled
+        assertSame(Download, restored.action)
+        assertEquals(0.45f, restored.progress)
     }
 }

@@ -32,7 +32,7 @@ import okhttp3.Request
 object RedditMediaDownloader {
     private const val TAG = "RedditMediaDownloader"
     private const val BUFFER_SIZE = 64 * 1024
-    internal const val DIRECTORY_NAME = "Seal Reddit"
+    internal const val DIRECTORY_NAME = "Walrus Reddit"
     private val client =
         OkHttpClient.Builder().followRedirects(true).followSslRedirects(true).build()
 
@@ -129,7 +129,7 @@ object RedditMediaDownloader {
             val userAgent =
                 USER_AGENT_STRING.getString().ifBlank {
                     System.getProperty("http.agent")
-                        ?: "Seal/${BuildConfig.VERSION_NAME} Android/${Build.VERSION.RELEASE}"
+                        ?: "WalrusDownloader/${BuildConfig.VERSION_NAME} Android/${Build.VERSION.RELEASE}"
                 }
             val request =
                 Request.Builder()
@@ -326,7 +326,7 @@ object RedditMediaDownloader {
     private fun relativePath(media: RedditMedia, separatePostFolders: Boolean): String =
         buildString {
             append(Environment.DIRECTORY_DOWNLOADS)
-            append("/Seal/$DIRECTORY_NAME")
+            append("/Walrus Downloader/$DIRECTORY_NAME")
             appendRedditDirectories(media, separatePostFolders)
             append('/')
         }

@@ -1,6 +1,7 @@
 @file:Suppress("UnstableApiUsage")
 
 import com.android.build.api.variant.FilterConfiguration
+import com.android.build.OutputFile
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -110,7 +111,7 @@ android {
             }
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            resValue("string", "app_name", "Seal Debug")
+            resValue("string", "app_name", "Walrus Downloader")
         }
     }
 
@@ -125,7 +126,7 @@ android {
         create("githubPreview") {
             dimension = "publishChannel"
             applicationIdSuffix = ".preview"
-            resValue("string", "app_name", "Seal Preview")
+            resValue("string", "app_name", "Walrus Downloader Preview")
         }
 
         create("fdroid") {
@@ -138,8 +139,14 @@ android {
 
     applicationVariants.all {
         outputs.all {
-            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName =
-                "Seal-${defaultConfig.versionName}-${name}.apk"
+            val variantOutput =
+                this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            variantOutput.outputFileName =
+                if (variantOutput.getFilter(OutputFile.ABI) == "arm64-v8a") {
+                    "Walrus Downloader.apk"
+                } else {
+                    "Walrus-Downloader-${defaultConfig.versionName}-${name}.apk"
+                }
         }
     }
 

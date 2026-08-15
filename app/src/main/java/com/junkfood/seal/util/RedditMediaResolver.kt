@@ -125,7 +125,7 @@ object RedditMediaResolver {
             val userAgent =
                 USER_AGENT_STRING.getString().ifBlank {
                     System.getProperty("http.agent")
-                        ?: "Seal/${BuildConfig.VERSION_NAME} Android/${Build.VERSION.RELEASE}"
+                        ?: "WalrusDownloader/${BuildConfig.VERSION_NAME} Android/${Build.VERSION.RELEASE}"
                 }
             val cookieHeader = DownloadUtil.getCookieHeaderFor("https://www.reddit.com/")
             val canonicalUrl = resolveShareRedirect(sourceUrl, userAgent, cookieHeader)
@@ -389,7 +389,7 @@ object RedditMediaResolver {
     private fun userAgent(): String =
         USER_AGENT_STRING.getString().ifBlank {
             System.getProperty("http.agent")
-                ?: "Seal/${BuildConfig.VERSION_NAME} Android/${Build.VERSION.RELEASE}"
+                ?: "WalrusDownloader/${BuildConfig.VERSION_NAME} Android/${Build.VERSION.RELEASE}"
         }
 
     private fun buildListingEndpoint(

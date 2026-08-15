@@ -86,7 +86,7 @@ class RedditMediaResolverTest {
         assertEquals(1, galleryAlbum.collectionIndex)
         assertEquals(2, galleryAlbum.collectionTotal)
         assertEquals(
-            "Seal Reddit/pics/02 - Native video [video1].%(ext)s",
+            "Walrus Reddit/pics/02 - Native video [video1].%(ext)s",
             tasks.last().task.preferences.outputTemplate,
         )
 
@@ -101,7 +101,7 @@ class RedditMediaResolverTest {
                 .task
                 .preferences
                 .outputTemplate
-                .startsWith("Seal Reddit/pics/02 - Native video [video1]/")
+                .startsWith("Walrus Reddit/pics/02 - Native video [video1]/")
         )
     }
 
