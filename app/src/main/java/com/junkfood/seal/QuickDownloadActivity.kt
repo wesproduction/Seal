@@ -4,30 +4,48 @@ import android.content.Intent
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -52,12 +70,14 @@ import com.junkfood.seal.util.setLanguage
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.getViewModel
 
 private const val TAG = "QuickDownloadActivity"
+private const val MIN_REDDIT_INDICATOR_MILLIS = 1_200L
 
 class QuickDownloadActivity : ComponentActivity() {
     private var sharedUrlCached: String = ""
@@ -210,25 +230,7 @@ class QuickDownloadActivity : ComponentActivity() {
                     isHighContrastModeEnabled = LocalDarkTheme.current.isHighContrastModeEnabled,
                 ) {
                     when (val state = redditShareState) {
-                        RedditShareState.LoadingPost ->
-                            AlertDialog(
-                                onDismissRequest = { finish() },
-                                icon = { Icon(Icons.Outlined.Download, null) },
-                                title = { Text(getString(R.string.reddit_preparing_download)) },
-                                text = {
-                                    Row {
-                                        CircularProgressIndicator()
-                                        Spacer(Modifier.width(16.dp))
-                                        Text(getString(R.string.reddit_reading_post))
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { finish() }) {
-                                        Text(getString(android.R.string.cancel))
-                                    }
-                                },
-                                confirmButton = {},
-                            )
+                        RedditShareState.LoadingPost -> RedditDownloadIndicator()
 
                         is RedditShareState.ConfirmFeed ->
                             AlertDialog(
@@ -322,11 +324,53 @@ class QuickDownloadActivity : ComponentActivity() {
         }
     }
 
+    @Composable
+    private fun RedditDownloadIndicator() {
+        val transition = rememberInfiniteTransition(label = "redditDownload")
+        val iconAlpha by
+            transition.animateFloat(
+                initialValue = 0.58f,
+                targetValue = 0.88f,
+                animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+                label = "redditDownloadIconAlpha",
+            )
+
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Surface(
+                modifier = Modifier.size(112.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
+                shadowElevation = 4.dp,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.walrus_launcher_foreground_source),
+                        contentDescription = getString(R.string.app_name),
+                        modifier =
+                            Modifier.size(64.dp).clip(RoundedCornerShape(20.dp)).alpha(iconAlpha),
+                    )
+                    Text(
+                        text = getString(R.string.reddit_downloading),
+                        modifier = Modifier.alpha(0.7f),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                    )
+                }
+            }
+        }
+    }
+
     private fun resolveRedditPost() {
         redditJob?.cancel()
         redditShareState = RedditShareState.LoadingPost
         redditJob =
             lifecycleScope.launch {
+                val indicatorStartedAt = SystemClock.elapsedRealtime()
                 try {
                     val post = RedditMediaResolver.resolve(sharedUrlCached)
                     val tasks =
@@ -335,6 +379,10 @@ class QuickDownloadActivity : ComponentActivity() {
                             preferences = DownloadUtil.DownloadPreferences.createFromPreferences(),
                         )
                     tasks.forEach(downloader::enqueue)
+                    val remainingIndicatorTime =
+                        MIN_REDDIT_INDICATOR_MILLIS -
+                            (SystemClock.elapsedRealtime() - indicatorStartedAt)
+                    if (remainingIndicatorTime > 0) delay(remainingIndicatorTime)
                     makeToast(
                         resources.getQuantityString(
                             R.plurals.reddit_items_queued,
