@@ -9,12 +9,13 @@ import com.junkfood.seal.util.DatabaseUtil
 import com.junkfood.seal.util.DownloadUtil
 import com.junkfood.seal.util.DownloadUtil.toCookiesFileContent
 import com.junkfood.seal.util.PreferenceUtil.updateBoolean
+import java.net.URI
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class CookiesViewModel : ViewModel() {
     companion object {
@@ -34,8 +35,7 @@ class CookiesViewModel : ViewModel() {
         get() = stateFlow.value
 
     fun setEditingProfile(
-        cookieProfile: CookieProfile =
-            CookieProfile(id = NEW_PROFILE_ID, url = "https://", content = "")
+        cookieProfile: CookieProfile = CookieProfile(id = NEW_PROFILE_ID, url = "", content = "")
     ) {
         mutableStateFlow.update { it.copy(editingCookieProfile = cookieProfile) }
     }
@@ -51,7 +51,7 @@ class CookiesViewModel : ViewModel() {
         }
     }
 
-    fun captureWebViewCookies(urls: List<String>): Job {
+    suspend fun captureWebViewCookies(urls: List<String>): CookieCaptureResult {
         val profile = state.editingCookieProfile
         val targetUrls =
             (urls + profile.url)
@@ -61,22 +61,16 @@ class CookiesViewModel : ViewModel() {
         val cookies =
             targetUrls
                 .flatMap { url -> Cookie.fromCookieHeader(url, cookieManager.getCookie(url)) }
-                .distinctBy { Triple(it.domain, it.path, it.name) }
+                .keepLatestValues()
 
-        return viewModelScope.launch(Dispatchers.IO) {
-            if (cookies.isNotEmpty()) {
-                val savedUrl =
-                    if (cookies.any { it.domain.removePrefix(".").endsWith("reddit.com") }) {
-                        REDDIT_LOGIN_URL
-                    } else {
-                        profile.url
-                    }
-                persistProfile(
-                    profile.copy(url = savedUrl, content = cookies.toCookiesFileContent())
-                )
-                COOKIES.updateBoolean(true)
-                DownloadUtil.refreshCookiesFile()
-            }
+        if (cookies.isEmpty()) return CookieCaptureResult(saved = false)
+
+        val savedUrl = cookieProfileUrl(targetUrls, cookies, profile.url)
+        return withContext(Dispatchers.IO) {
+            persistProfile(profile.copy(url = savedUrl, content = cookies.toCookiesFileContent()))
+            COOKIES.updateBoolean(true)
+            DownloadUtil.refreshCookiesFile()
+            CookieCaptureResult(saved = true, count = cookies.size, profileUrl = savedUrl)
         }
     }
 
@@ -140,3 +134,39 @@ class CookiesViewModel : ViewModel() {
 }
 
 const val REDDIT_LOGIN_URL = "https://www.reddit.com/login/"
+
+data class CookieCaptureResult(val saved: Boolean, val count: Int = 0, val profileUrl: String = "")
+
+internal fun List<Cookie>.keepLatestValues(): List<Cookie> =
+    asReversed().distinctBy { Triple(it.domain, it.path, it.name) }.asReversed()
+
+internal fun cookieProfileUrl(
+    visitedUrls: List<String>,
+    cookies: List<Cookie>,
+    fallbackUrl: String,
+): String {
+    if (cookies.any { it.domain.removePrefix(".").endsWith("reddit.com") }) {
+        return REDDIT_LOGIN_URL
+    }
+
+    val matchingUrl =
+        visitedUrls.asReversed().firstOrNull { url ->
+            cookies.any { cookie -> cookie.matches(url) }
+        }
+    val preferredUrl = matchingUrl ?: visitedUrls.lastOrNull() ?: fallbackUrl
+    return runCatching {
+            val uri = URI(preferredUrl)
+            check(
+                (uri.scheme.equals("http", ignoreCase = true) ||
+                    uri.scheme.equals("https", ignoreCase = true)) && !uri.host.isNullOrBlank()
+            )
+            buildString {
+                append(uri.scheme.lowercase())
+                append("://")
+                append(uri.host.lowercase())
+                if (uri.port >= 0) append(":${uri.port}")
+                append('/')
+            }
+        }
+        .getOrDefault(fallbackUrl)
+}

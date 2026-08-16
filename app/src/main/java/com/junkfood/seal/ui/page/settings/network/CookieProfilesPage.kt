@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Cookie
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteForever
@@ -34,6 +33,7 @@ import androidx.compose.material.icons.outlined.GeneratingTokens
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Login
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -298,6 +298,25 @@ fun CookieProfilePage(
 
             item {
                 PreferenceItemVariant(
+                    title = stringResource(id = R.string.open_sign_in_browser),
+                    description = stringResource(id = R.string.open_sign_in_browser_desc),
+                    icon = Icons.Outlined.Public,
+                ) {
+                    cookiesViewModel.setEditingProfile()
+                    navigateToCookieGeneratorPage()
+                }
+            }
+            item {
+                PreferenceItemVariant(
+                    title = stringResource(id = R.string.import_browser_cookies),
+                    description = stringResource(id = R.string.import_browser_cookies_desc),
+                    icon = Icons.Outlined.FileOpen,
+                ) {
+                    importLauncher.launch(arrayOf("text/plain", "text/*"))
+                }
+            }
+            item {
+                PreferenceItemVariant(
                     title = stringResource(id = R.string.reddit_sign_in),
                     description = stringResource(id = R.string.reddit_sign_in_desc),
                     icon = Icons.Outlined.Login,
@@ -306,15 +325,6 @@ fun CookieProfilePage(
                         CookieProfile(id = 0, url = REDDIT_LOGIN_URL, content = "")
                     )
                     navigateToCookieGeneratorPage()
-                }
-            }
-            item {
-                PreferenceItemVariant(
-                    title = stringResource(id = R.string.generate_new_cookies),
-                    icon = Icons.Outlined.Add,
-                ) {
-                    cookiesViewModel.setEditingProfile()
-                    showEditDialog = true
                 }
             }
             item {

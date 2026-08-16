@@ -280,10 +280,7 @@ fun NavGraphBuilder.settingsGraph(
             }
         }
         animatedComposable(Route.COOKIE_GENERATOR_WEBVIEW) {
-            WebViewPage(cookiesViewModel = cookiesViewModel) { urls ->
-                cookiesViewModel.captureWebViewCookies(urls)
-                onNavigateBack()
-            }
+            WebViewPage(cookiesViewModel = cookiesViewModel, onDismissRequest = onNavigateBack)
         }
         animatedComposable(Route.TROUBLESHOOTING) {
             TroubleShootingPage(onNavigateTo = onNavigateTo, onBack = onNavigateBack)
