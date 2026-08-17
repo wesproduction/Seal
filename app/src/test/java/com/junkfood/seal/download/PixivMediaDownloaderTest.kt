@@ -3,6 +3,7 @@ package com.junkfood.seal.download
 import com.junkfood.seal.download.Task.TypeInfo.PixivArtwork
 import com.junkfood.seal.download.Task.TypeInfo.PixivMediaItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PixivMediaDownloaderTest {
@@ -29,6 +30,55 @@ class PixivMediaDownloaderTest {
             "Artwork_ name - by Artist_ name [12345].mp4",
             PixivMediaDownloader.orderedFileName(artwork, animation),
         )
+    }
+
+    @Test
+    fun concurrentGalleryReservationsNeverOverlapOrInterleave() {
+        val first =
+            PixivMediaDownloader.reserveGalleryTimestampBlock(
+                nowMillis = 1_000_000L,
+                itemCount = 12,
+                previousTopSecond = null,
+                previousBottomSecond = null,
+            )
+        val second =
+            PixivMediaDownloader.reserveGalleryTimestampBlock(
+                nowMillis = 1_001_000L,
+                itemCount = 12,
+                previousTopSecond = first.topSecond,
+                previousBottomSecond = first.bottomSecond,
+            )
+
+        assertTrue(second.topSecond < first.bottomSecond)
+        val galleryOrder =
+            buildList {
+                    (1..12).forEach { page -> add("first" to (first.baseSecond - page)) }
+                    (1..12).forEach { page -> add("second" to (second.baseSecond - page)) }
+                }
+                .sortedByDescending { it.second }
+                .map { it.first }
+        assertEquals(List(12) { "first" } + List(12) { "second" }, galleryOrder)
+    }
+
+    @Test
+    fun laterGalleryUsesCurrentTimeAfterPreviousBlockCanNoLongerOverlap() {
+        val previous =
+            PixivMediaDownloader.reserveGalleryTimestampBlock(
+                nowMillis = 1_000_000L,
+                itemCount = 12,
+                previousTopSecond = null,
+                previousBottomSecond = null,
+            )
+        val later =
+            PixivMediaDownloader.reserveGalleryTimestampBlock(
+                nowMillis = 1_020_000L,
+                itemCount = 12,
+                previousTopSecond = previous.topSecond,
+                previousBottomSecond = previous.bottomSecond,
+            )
+
+        assertEquals(1_020L, later.baseSecond)
+        assertTrue(later.bottomSecond > previous.topSecond)
     }
 
     private fun artwork(total: Int): PixivArtwork =

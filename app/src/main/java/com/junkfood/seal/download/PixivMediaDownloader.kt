@@ -29,6 +29,8 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -36,9 +38,16 @@ object PixivMediaDownloader {
     private const val TAG = "PixivMediaDownloader"
     private const val BUFFER_SIZE = 64 * 1024
     private const val MAX_EXTRACTED_BYTES = 2L * 1024L * 1024L * 1024L
+    private const val GALLERY_ORDER_PREFERENCES = "pixiv_gallery_order"
+    private const val LAST_GALLERY_TOP_SECOND = "last_gallery_top_second"
+    private const val LAST_GALLERY_BOTTOM_SECOND = "last_gallery_bottom_second"
+    private const val DOWNLOAD_PHASE_PERCENT = 94f
+    private const val PUBLISH_COPY_PHASE_PERCENT = 4f
+    private const val PUBLISH_VISIBILITY_PHASE_PERCENT = 2f
     internal const val DIRECTORY_NAME = "Walrus Pixiv"
     private val client =
         OkHttpClient.Builder().followRedirects(true).followSslRedirects(true).build()
+    private val galleryPublishMutex = Mutex()
 
     suspend fun downloadArtwork(
         artwork: PixivArtwork,
@@ -55,51 +64,49 @@ object PixivMediaDownloader {
             File(context.cacheDir, "pixiv-${artwork.artworkId}-${System.nanoTime()}").apply {
                 mkdirs()
             }
-        val paths = mutableListOf<String>()
-        val pendingUris = mutableMapOf<String, Uri>()
-        val galleryTimestamp = System.currentTimeMillis()
+        val stagedItems = mutableListOf<StagedItem>()
         var completedBytes = 0L
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !preferences.privateDirectory) {
-                artwork.items.asReversed().forEach { item ->
-                    if (findCompletedMediaStoreItem(artwork, item) == null) {
-                        pendingUris[item.mediaId] =
-                            createPendingMediaStoreItem(artwork, item, galleryTimestamp)
-                    }
-                }
-            }
             artwork.items.forEachIndexed { completedItems, item ->
                 coroutineContext.ensureActive()
                 var currentBytes = 0L
-                val itemResult =
-                    downloadItem(
-                        artwork,
-                        item,
-                        preferences,
-                        workDirectory,
-                        pendingUris[item.mediaId],
-                        galleryTimestamp,
-                    ) { itemProgress, downloadedBytes, _ ->
+                val stagedItem =
+                    stageItem(artwork, item, preferences, workDirectory) {
+                        itemProgress,
+                        downloadedBytes,
+                        _ ->
                         currentBytes = downloadedBytes
                         val boundedProgress = itemProgress.coerceIn(0f, 100f)
                         val overall =
-                            (completedItems + boundedProgress / 100f) * 100f / artwork.items.size
+                            (completedItems + boundedProgress / 100f) * DOWNLOAD_PHASE_PERCENT /
+                                artwork.items.size
                         progressCallback?.invoke(
                             overall,
                             completedBytes + downloadedBytes,
-                            "${completedItems + 1}/${artwork.items.size} - ${boundedProgress.toInt()}%",
+                            "Preparing ${completedItems + 1}/${artwork.items.size} - ${boundedProgress.toInt()}%",
                         )
                     }
-                paths += itemResult.path
-                pendingUris.remove(item.mediaId)
-                completedBytes += maxOf(currentBytes, itemResult.downloadedBytes)
+                stagedItems += stagedItem
+                completedBytes += maxOf(currentBytes, stagedItem.downloadedBytes)
                 progressCallback?.invoke(
-                    (completedItems + 1) * 100f / artwork.items.size,
+                    (completedItems + 1) * DOWNLOAD_PHASE_PERCENT / artwork.items.size,
                     completedBytes,
-                    "${completedItems + 1}/${artwork.items.size}",
+                    "Prepared ${completedItems + 1}/${artwork.items.size}",
                 )
             }
-            applyGalleryOrder(artwork, paths, galleryTimestamp)
+
+            coroutineContext.ensureActive()
+            val paths =
+                galleryPublishMutex.withLock {
+                    coroutineContext.ensureActive()
+                    publishStagedArtwork(
+                        artwork = artwork,
+                        stagedItems = stagedItems,
+                        preferences = preferences,
+                        completedBytes = completedBytes,
+                        progressCallback = progressCallback,
+                    )
+                }
             Result.success(paths)
         } catch (cancellation: CancellationException) {
             throw cancellation
@@ -107,22 +114,19 @@ object PixivMediaDownloader {
             Log.e(TAG, "Pixiv download failed for ${artwork.artworkId}", throwable)
             Result.failure(throwable)
         } finally {
-            pendingUris.values.forEach { uri -> context.contentResolver.delete(uri, null, null) }
             workDirectory.deleteRecursively()
         }
     }
 
-    private suspend fun downloadItem(
+    private suspend fun stageItem(
         artwork: PixivArtwork,
         item: PixivMediaItem,
         preferences: DownloadPreferences,
         workDirectory: File,
-        pendingMediaUri: Uri?,
-        galleryTimestamp: Long,
         progressCallback: ((Float, Long, String) -> Unit)?,
-    ): ItemResult {
+    ): StagedItem {
         findExisting(artwork, item, preferences)?.let {
-            return ItemResult(it, 0L)
+            return StagedItem(item = item, existingPath = it)
         }
         val itemDirectory = File(workDirectory, item.mediaId).apply { mkdirs() }
         val mediaFile =
@@ -133,18 +137,12 @@ object PixivMediaDownloader {
                 val bytes = downloadToFile(artwork, item, source, progressCallback)
                 PreparedFile(source, bytes)
             }
-        progressCallback?.invoke(94f, mediaFile.downloadedBytes, "Saving")
-        val path =
-            publishPreparedFile(
-                artwork,
-                item,
-                preferences,
-                mediaFile.file,
-                pendingMediaUri,
-                galleryTimestamp,
-            )
-        progressCallback?.invoke(100f, mediaFile.downloadedBytes, "Saved")
-        return ItemResult(path, mediaFile.downloadedBytes)
+        progressCallback?.invoke(100f, mediaFile.downloadedBytes, "Prepared")
+        return StagedItem(
+            item = item,
+            preparedFile = mediaFile.file,
+            downloadedBytes = mediaFile.downloadedBytes,
+        )
     }
 
     private suspend fun prepareUgoira(
@@ -373,32 +371,118 @@ object PixivMediaDownloader {
         }
     }
 
-    private suspend fun publishPreparedFile(
+    private fun publishStagedArtwork(
+        artwork: PixivArtwork,
+        stagedItems: List<StagedItem>,
+        preferences: DownloadPreferences,
+        completedBytes: Long,
+        progressCallback: ((Float, Long, String) -> Unit)?,
+    ): List<String> {
+        val galleryTimestamp = reserveGalleryTimestamp(stagedItems.size)
+        val paths = MutableList<String?>(stagedItems.size) { null }
+        val createdUris = mutableListOf<Uri>()
+        val pendingUris = mutableMapOf<String, Uri>()
+
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !preferences.privateDirectory) {
+                stagedItems.asReversed().forEach { staged ->
+                    if (staged.preparedFile != null) {
+                        createPendingMediaStoreItem(artwork, staged.item, galleryTimestamp).also {
+                            uri ->
+                            pendingUris[staged.item.mediaId] = uri
+                            createdUris += uri
+                        }
+                    }
+                }
+
+                // Keep every new page pending and invisible until the complete artwork has been
+                // copied. Publishing only starts after this loop succeeds for every page.
+                stagedItems.forEachIndexed { index, staged ->
+                    paths[index] =
+                        staged.existingPath
+                            ?: pendingUris
+                                .getValue(staged.item.mediaId)
+                                .also { uri ->
+                                    writePreparedMediaStoreItem(
+                                        uri,
+                                        requireNotNull(staged.preparedFile),
+                                        artwork,
+                                        staged.item,
+                                    )
+                                }
+                                .toString()
+                    progressCallback?.invoke(
+                        DOWNLOAD_PHASE_PERCENT +
+                            (index + 1f) / stagedItems.size * PUBLISH_COPY_PHASE_PERCENT,
+                        completedBytes,
+                        "Finalizing artwork",
+                    )
+                }
+
+                stagedItems.forEachIndexed { index, staged ->
+                    pendingUris[staged.item.mediaId]?.let { uri ->
+                        publishMediaStoreItem(uri, staged.item, galleryTimestamp)
+                    }
+                    progressCallback?.invoke(
+                        DOWNLOAD_PHASE_PERCENT +
+                            PUBLISH_COPY_PHASE_PERCENT +
+                            (index + 1f) / stagedItems.size * PUBLISH_VISIBILITY_PHASE_PERCENT,
+                        completedBytes,
+                        "Adding artwork to Gallery",
+                    )
+                }
+            } else {
+                stagedItems.forEachIndexed { index, staged ->
+                    paths[index] =
+                        staged.existingPath
+                            ?: publishPreparedLegacyFile(
+                                artwork = artwork,
+                                item = staged.item,
+                                preferences = preferences,
+                                preparedFile = requireNotNull(staged.preparedFile),
+                                galleryTimestamp = galleryTimestamp,
+                            )
+                    progressCallback?.invoke(
+                        DOWNLOAD_PHASE_PERCENT +
+                            (index + 1f) / stagedItems.size *
+                                (PUBLISH_COPY_PHASE_PERCENT + PUBLISH_VISIBILITY_PHASE_PERCENT),
+                        completedBytes,
+                        "Adding artwork to Gallery",
+                    )
+                }
+            }
+
+            val completedPaths = paths.map { requireNotNull(it) }
+            applyGalleryOrder(artwork, completedPaths, galleryTimestamp)
+            progressCallback?.invoke(100f, completedBytes, "Saved as one artwork")
+            completedPaths
+        } catch (throwable: Throwable) {
+            createdUris.asReversed().forEach { uri ->
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            throw throwable
+        }
+    }
+
+    private fun writePreparedMediaStoreItem(
+        uri: Uri,
+        preparedFile: File,
+        artwork: PixivArtwork,
+        item: PixivMediaItem,
+    ) {
+        val output =
+            context.contentResolver.openOutputStream(uri, "w")
+                ?: throw IOException("Unable to save ${orderedFileName(artwork, item)}")
+        output.use { preparedFile.inputStream().buffered().use { input -> input.copyTo(it) } }
+    }
+
+    private fun publishPreparedLegacyFile(
         artwork: PixivArtwork,
         item: PixivMediaItem,
         preferences: DownloadPreferences,
         preparedFile: File,
-        pendingMediaUri: Uri?,
         galleryTimestamp: Long,
     ): String {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !preferences.privateDirectory) {
-            val uri =
-                pendingMediaUri ?: createPendingMediaStoreItem(artwork, item, galleryTimestamp)
-            return try {
-                val output =
-                    context.contentResolver.openOutputStream(uri, "w")
-                        ?: throw IOException("Unable to save ${orderedFileName(artwork, item)}")
-                output.use {
-                    preparedFile.inputStream().buffered().use { input -> input.copyTo(it) }
-                }
-                publishMediaStoreItem(uri, item, galleryTimestamp)
-                uri.toString()
-            } catch (throwable: Throwable) {
-                context.contentResolver.delete(uri, null, null)
-                throw throwable
-            }
-        }
-
         val preferred = targetFile(artwork, item, preferences)
         if (preferred.isFile && preferred.length() > 0L) return preferred.absolutePath
         val target = RedditMediaDownloader.availableTargetFile(preferred)
@@ -414,6 +498,65 @@ object PixivMediaDownloader {
             null,
         )
         return target.absolutePath
+    }
+
+    private fun reserveGalleryTimestamp(itemCount: Int): Long {
+        val preferences =
+            context.getSharedPreferences(
+                GALLERY_ORDER_PREFERENCES,
+                android.content.Context.MODE_PRIVATE,
+            )
+        val previousTop =
+            if (preferences.contains(LAST_GALLERY_TOP_SECOND)) {
+                preferences.getLong(LAST_GALLERY_TOP_SECOND, 0L)
+            } else {
+                null
+            }
+        val previousBottom =
+            if (preferences.contains(LAST_GALLERY_BOTTOM_SECOND)) {
+                preferences.getLong(LAST_GALLERY_BOTTOM_SECOND, 0L)
+            } else {
+                null
+            }
+        val block =
+            reserveGalleryTimestampBlock(
+                nowMillis = System.currentTimeMillis(),
+                itemCount = itemCount,
+                previousTopSecond = previousTop,
+                previousBottomSecond = previousBottom,
+            )
+        preferences
+            .edit()
+            .putLong(LAST_GALLERY_TOP_SECOND, block.topSecond)
+            .putLong(LAST_GALLERY_BOTTOM_SECOND, block.bottomSecond)
+            .apply()
+        return block.baseSecond * 1_000L
+    }
+
+    internal fun reserveGalleryTimestampBlock(
+        nowMillis: Long,
+        itemCount: Int,
+        previousTopSecond: Long?,
+        previousBottomSecond: Long?,
+    ): GalleryTimestampBlock {
+        val count = itemCount.coerceAtLeast(1).toLong()
+        val naturalBase = nowMillis / 1_000L
+        val naturalTop = naturalBase - 1L
+        val naturalBottom = naturalBase - count
+        val previousIsValid =
+            previousTopSecond != null &&
+                previousBottomSecond != null &&
+                previousBottomSecond <= previousTopSecond
+        val overlapsPrevious =
+            previousIsValid &&
+                naturalBottom <= requireNotNull(previousTopSecond) &&
+                naturalTop >= requireNotNull(previousBottomSecond)
+        val base = if (overlapsPrevious) requireNotNull(previousBottomSecond) else naturalBase
+        return GalleryTimestampBlock(
+            baseSecond = base,
+            topSecond = base - 1L,
+            bottomSecond = base - count,
+        )
     }
 
     private fun findExisting(
@@ -613,7 +756,18 @@ object PixivMediaDownloader {
 
     private data class PreparedFile(val file: File, val downloadedBytes: Long)
 
-    private data class ItemResult(val path: String, val downloadedBytes: Long)
+    private data class StagedItem(
+        val item: PixivMediaItem,
+        val existingPath: String? = null,
+        val preparedFile: File? = null,
+        val downloadedBytes: Long = 0L,
+    )
+
+    internal data class GalleryTimestampBlock(
+        val baseSecond: Long,
+        val topSecond: Long,
+        val bottomSecond: Long,
+    )
 
     private data class ProcessResult(val exitCode: Int, val output: String)
 }
