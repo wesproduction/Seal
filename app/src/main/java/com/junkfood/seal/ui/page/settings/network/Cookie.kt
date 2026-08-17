@@ -48,6 +48,7 @@ data class Cookie(
             val domain =
                 when {
                     host == "reddit.com" || host.endsWith(".reddit.com") -> ".reddit.com"
+                    host == "pixiv.net" || host.endsWith(".pixiv.net") -> ".pixiv.net"
                     else -> ".${host.removePrefix("www.")}"
                 }
             return header

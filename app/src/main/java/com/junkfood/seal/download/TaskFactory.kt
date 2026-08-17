@@ -5,6 +5,7 @@ import com.junkfood.seal.download.Task.DownloadState.Idle
 import com.junkfood.seal.download.Task.DownloadState.ReadyWithInfo
 import com.junkfood.seal.util.DownloadUtil.DownloadPreferences
 import com.junkfood.seal.util.Format
+import com.junkfood.seal.util.PixivMediaResolver
 import com.junkfood.seal.util.PlaylistResult
 import com.junkfood.seal.util.RedditMediaResolver
 import com.junkfood.seal.util.VideoClip
@@ -161,6 +162,62 @@ object TaskFactory {
                     RedditCollection(name = feed.target.name, index = index + 1, total = total),
             )
         }
+    }
+
+    @CheckResult
+    fun createFromPixivArtwork(
+        artwork: PixivMediaResolver.PixivArtwork,
+        preferences: DownloadPreferences,
+    ): TaskWithState {
+        val type =
+            Task.TypeInfo.PixivArtwork(
+                artworkId = artwork.id,
+                title = artwork.title,
+                artist = artwork.artist,
+                artistId = artwork.artistId,
+                sourceUrl = artwork.canonicalUrl,
+                createdAtMillis = artwork.createdAtMillis,
+                items =
+                    artwork.media.map { media ->
+                        Task.TypeInfo.PixivMediaItem(
+                            mediaId = media.id,
+                            mediaUrl = media.mediaUrl,
+                            mimeType = media.mimeType,
+                            extension = media.extension,
+                            index = media.index,
+                            total = media.total,
+                            ugoiraFrames =
+                                media.ugoiraFrames.map { frame ->
+                                    Task.TypeInfo.PixivUgoiraFrame(
+                                        file = frame.file,
+                                        delayMillis = frame.delayMillis,
+                                    )
+                                },
+                        )
+                    },
+            )
+        val itemLabel =
+            when {
+                type.items.singleOrNull()?.isUgoira == true -> "${artwork.title} · animation"
+                type.items.size > 1 -> "${artwork.title} · ${type.items.size}-page artwork"
+                else -> artwork.title
+            }
+        return TaskWithState(
+            task = Task(url = artwork.canonicalUrl, type = type, preferences = preferences),
+            state =
+                Task.State(
+                    downloadState = ReadyWithInfo,
+                    videoInfo = null,
+                    viewState =
+                        Task.ViewState(
+                            url = artwork.canonicalUrl,
+                            title = itemLabel,
+                            uploader = artwork.artist,
+                            extractorKey = "Pixiv",
+                            thumbnailUrl = artwork.thumbnailUrl,
+                        ),
+                ),
+        )
     }
 
     private fun redditVideoOutputTemplate(

@@ -21,6 +21,7 @@ private val TypeInfo.id: String
                 "reddit_album_${collectionName.orEmpty()}_${collectionIndex}_${postId}"
             is TypeInfo.RedditMedia ->
                 "reddit_${collectionName.orEmpty()}_${collectionIndex}_${postId}_${index}_${mediaId}"
+            is TypeInfo.PixivArtwork -> "pixiv_$artworkId"
             TypeInfo.URL -> ""
         }
 
@@ -93,6 +94,33 @@ data class Task(
             val collectionIndex: Int = 0,
             val collectionTotal: Int = 0,
         ) : TypeInfo
+
+        @Serializable
+        data class PixivArtwork(
+            val artworkId: String,
+            val title: String,
+            val artist: String,
+            val artistId: String,
+            val sourceUrl: String,
+            val createdAtMillis: Long,
+            val items: List<PixivMediaItem>,
+        ) : TypeInfo
+
+        @Serializable
+        data class PixivMediaItem(
+            val mediaId: String,
+            val mediaUrl: String,
+            val mimeType: String,
+            val extension: String,
+            val index: Int,
+            val total: Int,
+            val ugoiraFrames: List<PixivUgoiraFrame> = emptyList(),
+        ) {
+            val isUgoira: Boolean
+                get() = ugoiraFrames.isNotEmpty()
+        }
+
+        @Serializable data class PixivUgoiraFrame(val file: String, val delayMillis: Int)
 
         @Serializable data object URL : TypeInfo
     }

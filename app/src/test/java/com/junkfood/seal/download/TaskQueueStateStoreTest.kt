@@ -98,6 +98,46 @@ class TaskQueueStateStoreTest {
     }
 
     @Test
+    fun pixivArtworkAndUgoiraTimingSurviveQueueBackupSerialization() {
+        val pixivTask =
+            Task(
+                url = "https://www.pixiv.net/artworks/72011782",
+                type =
+                    Task.TypeInfo.PixivArtwork(
+                        artworkId = "72011782",
+                        title = "Animation",
+                        artist = "Artist",
+                        artistId = "123",
+                        sourceUrl = "https://www.pixiv.net/artworks/72011782",
+                        createdAtMillis = 456L,
+                        items =
+                            listOf(
+                                Task.TypeInfo.PixivMediaItem(
+                                    mediaId = "72011782_ugoira",
+                                    mediaUrl = "https://i.pximg.net/animation.zip",
+                                    mimeType = "video/mp4",
+                                    extension = "mp4",
+                                    index = 1,
+                                    total = 1,
+                                    ugoiraFrames =
+                                        listOf(
+                                            Task.TypeInfo.PixivUgoiraFrame("000000.jpg", 42),
+                                            Task.TypeInfo.PixivUgoiraFrame("000001.jpg", 83),
+                                        ),
+                                )
+                            ),
+                    ),
+                preferences = DownloadUtil.DownloadPreferences.EMPTY,
+            )
+
+        val restored = Json.decodeFromString<Task>(Json.encodeToString(pixivTask))
+        val artwork = restored.type as Task.TypeInfo.PixivArtwork
+
+        assertEquals(pixivTask.id, restored.id)
+        assertEquals(listOf(42, 83), artwork.items.single().ugoiraFrames.map { it.delayMillis })
+    }
+
+    @Test
     fun completedAlbumKeepsItsOrderedPathsAndCompletionTimeWhenSerialized() {
         val completed =
             Completed(

@@ -63,6 +63,7 @@ import com.junkfood.seal.ui.page.settings.interaction.InteractionPreferencePage
 import com.junkfood.seal.ui.page.settings.network.CookieProfilePage
 import com.junkfood.seal.ui.page.settings.network.CookiesViewModel
 import com.junkfood.seal.ui.page.settings.network.NetworkPreferences
+import com.junkfood.seal.ui.page.settings.network.PIXIV_LOGIN_URL
 import com.junkfood.seal.ui.page.settings.network.REDDIT_LOGIN_URL
 import com.junkfood.seal.ui.page.settings.network.WebViewPage
 import com.junkfood.seal.ui.page.settings.troubleshooting.TroubleShootingPage
@@ -80,6 +81,8 @@ fun AppEntry(
     dialogViewModel: DownloadDialogViewModel,
     openRedditLoginRequest: Boolean = false,
     onRedditLoginRequestConsumed: () -> Unit = {},
+    openPixivLoginRequest: Boolean = false,
+    onPixivLoginRequestConsumed: () -> Unit = {},
 ) {
 
     val navController = rememberNavController()
@@ -102,6 +105,16 @@ fun AppEntry(
             )
             navController.navigate(Route.COOKIE_GENERATOR_WEBVIEW) { launchSingleTop = true }
             onRedditLoginRequestConsumed()
+        }
+    }
+
+    LaunchedEffect(openPixivLoginRequest) {
+        if (openPixivLoginRequest) {
+            cookiesViewModel.setEditingProfile(
+                CookieProfile(id = 0, url = PIXIV_LOGIN_URL, content = "")
+            )
+            navController.navigate(Route.COOKIE_GENERATOR_WEBVIEW) { launchSingleTop = true }
+            onPixivLoginRequestConsumed()
         }
     }
 

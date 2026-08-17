@@ -27,11 +27,13 @@ import org.koin.compose.KoinContext
 class MainActivity : AppCompatActivity() {
     private val dialogViewModel: DownloadDialogViewModel by viewModel()
     private var openRedditLoginRequest by mutableStateOf(false)
+    private var openPixivLoginRequest by mutableStateOf(false)
 
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         openRedditLoginRequest = intent.getBooleanExtra(EXTRA_OPEN_REDDIT_LOGIN, false)
+        openPixivLoginRequest = intent.getBooleanExtra(EXTRA_OPEN_PIXIV_LOGIN, false)
 
         if (Build.VERSION.SDK_INT < 33) {
             runBlocking { setLanguage(PreferenceUtil.getLocaleFromPreference()) }
@@ -51,6 +53,8 @@ class MainActivity : AppCompatActivity() {
                             dialogViewModel = dialogViewModel,
                             openRedditLoginRequest = openRedditLoginRequest,
                             onRedditLoginRequestConsumed = { openRedditLoginRequest = false },
+                            openPixivLoginRequest = openPixivLoginRequest,
+                            onPixivLoginRequestConsumed = { openPixivLoginRequest = false },
                         )
                     }
                 }
@@ -62,6 +66,10 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_REDDIT_LOGIN, false)) {
             openRedditLoginRequest = true
+            return
+        }
+        if (intent.getBooleanExtra(EXTRA_OPEN_PIXIV_LOGIN, false)) {
+            openPixivLoginRequest = true
             return
         }
         val url = intent.getSharedURL()
@@ -99,5 +107,6 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
         private var sharedUrlCached = ""
         const val EXTRA_OPEN_REDDIT_LOGIN = "com.junkfood.seal.extra.OPEN_REDDIT_LOGIN"
+        const val EXTRA_OPEN_PIXIV_LOGIN = "com.junkfood.seal.extra.OPEN_PIXIV_LOGIN"
     }
 }

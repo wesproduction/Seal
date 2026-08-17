@@ -82,6 +82,8 @@ class CookiesViewModel : ViewModel() {
         val profileUrl =
             if (cookies.any { it.domain.removePrefix(".").endsWith("reddit.com") }) {
                 REDDIT_LOGIN_URL
+            } else if (cookies.any { it.domain.removePrefix(".").endsWith("pixiv.net") }) {
+                PIXIV_LOGIN_URL
             } else {
                 "https://$primaryDomain/"
             }
@@ -134,6 +136,7 @@ class CookiesViewModel : ViewModel() {
 }
 
 const val REDDIT_LOGIN_URL = "https://www.reddit.com/login/"
+const val PIXIV_LOGIN_URL = "https://accounts.pixiv.net/login?lang=en"
 
 data class CookieCaptureResult(val saved: Boolean, val count: Int = 0, val profileUrl: String = "")
 
@@ -147,6 +150,9 @@ internal fun cookieProfileUrl(
 ): String {
     if (cookies.any { it.domain.removePrefix(".").endsWith("reddit.com") }) {
         return REDDIT_LOGIN_URL
+    }
+    if (cookies.any { it.domain.removePrefix(".").endsWith("pixiv.net") }) {
+        return PIXIV_LOGIN_URL
     }
 
     val matchingUrl =

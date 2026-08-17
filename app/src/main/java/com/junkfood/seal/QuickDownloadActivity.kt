@@ -62,6 +62,7 @@ import com.junkfood.seal.ui.page.downloadv2.configure.FormatPage
 import com.junkfood.seal.ui.page.downloadv2.configure.PlaylistSelectionPage
 import com.junkfood.seal.ui.theme.SealTheme
 import com.junkfood.seal.util.DownloadUtil
+import com.junkfood.seal.util.PixivMediaResolver
 import com.junkfood.seal.util.PreferenceUtil
 import com.junkfood.seal.util.RedditMediaResolver
 import com.junkfood.seal.util.makeToast
@@ -77,7 +78,7 @@ import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.getViewModel
 
 private const val TAG = "QuickDownloadActivity"
-private const val MIN_REDDIT_INDICATOR_MILLIS = 1_200L
+private const val MIN_COMPACT_INDICATOR_MILLIS = 1_200L
 
 class QuickDownloadActivity : ComponentActivity() {
     private var sharedUrlCached: String = ""
@@ -85,6 +86,8 @@ class QuickDownloadActivity : ComponentActivity() {
     private var redditJob: Job? = null
     private var redditFeedTarget: RedditMediaResolver.FeedTarget? = null
     private var redditShareState by mutableStateOf<RedditShareState>(RedditShareState.LoadingPost)
+    private var pixivJob: Job? = null
+    private var pixivShareState by mutableStateOf<PixivShareState>(PixivShareState.LoadingArtwork)
 
     private fun Intent.getSharedURL(): String? {
         val intent = this
@@ -143,6 +146,12 @@ class QuickDownloadActivity : ComponentActivity() {
                 redditFeedTarget?.let(RedditShareState::ConfirmFeed) ?: RedditShareState.LoadingPost
             showRedditShareHandler()
             if (redditFeedTarget == null) resolveRedditPost()
+            return
+        }
+
+        if (PixivMediaResolver.isPixivArtworkUrl(sharedUrlCached)) {
+            showPixivShareHandler()
+            resolvePixivArtwork()
             return
         }
 
@@ -230,7 +239,7 @@ class QuickDownloadActivity : ComponentActivity() {
                     isHighContrastModeEnabled = LocalDarkTheme.current.isHighContrastModeEnabled,
                 ) {
                     when (val state = redditShareState) {
-                        RedditShareState.LoadingPost -> RedditDownloadIndicator()
+                        RedditShareState.LoadingPost -> CompactDownloadIndicator("redditDownload")
 
                         is RedditShareState.ConfirmFeed ->
                             AlertDialog(
@@ -325,14 +334,14 @@ class QuickDownloadActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun RedditDownloadIndicator() {
-        val transition = rememberInfiniteTransition(label = "redditDownload")
+    private fun CompactDownloadIndicator(animationLabel: String) {
+        val transition = rememberInfiniteTransition(label = animationLabel)
         val iconAlpha by
             transition.animateFloat(
                 initialValue = 0.58f,
                 targetValue = 0.88f,
                 animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-                label = "redditDownloadIconAlpha",
+                label = "${animationLabel}IconAlpha",
             )
 
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -365,6 +374,73 @@ class QuickDownloadActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
+    private fun showPixivShareHandler() {
+        setContent {
+            SettingsProvider(calculateWindowSizeClass(this).widthSizeClass) {
+                SealTheme(
+                    darkTheme = LocalDarkTheme.current.isDarkTheme(),
+                    isHighContrastModeEnabled = LocalDarkTheme.current.isHighContrastModeEnabled,
+                ) {
+                    when (val state = pixivShareState) {
+                        PixivShareState.LoadingArtwork -> CompactDownloadIndicator("pixivDownload")
+
+                        is PixivShareState.Error ->
+                            AlertDialog(
+                                onDismissRequest = { finish() },
+                                icon = { Icon(Icons.Outlined.Download, null) },
+                                title = { Text(getString(R.string.pixiv_download_error)) },
+                                text = { Text(state.throwable.message.orEmpty()) },
+                                dismissButton = {
+                                    TextButton(onClick = { finish() }) {
+                                        Text(getString(android.R.string.cancel))
+                                    }
+                                },
+                                confirmButton = {
+                                    Row {
+                                        TextButton(onClick = ::openPixivSignIn) {
+                                            Text(getString(R.string.pixiv_sign_in))
+                                        }
+                                        TextButton(onClick = ::resolvePixivArtwork) {
+                                            Text(getString(R.string.retry))
+                                        }
+                                    }
+                                },
+                            )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun resolvePixivArtwork() {
+        pixivJob?.cancel()
+        pixivShareState = PixivShareState.LoadingArtwork
+        pixivJob =
+            lifecycleScope.launch {
+                val indicatorStartedAt = SystemClock.elapsedRealtime()
+                try {
+                    val artwork = PixivMediaResolver.resolve(sharedUrlCached)
+                    val task =
+                        TaskFactory.createFromPixivArtwork(
+                            artwork = artwork,
+                            preferences = DownloadUtil.DownloadPreferences.createFromPreferences(),
+                        )
+                    downloader.enqueue(task)
+                    val remainingIndicatorTime =
+                        MIN_COMPACT_INDICATOR_MILLIS -
+                            (SystemClock.elapsedRealtime() - indicatorStartedAt)
+                    if (remainingIndicatorTime > 0) delay(remainingIndicatorTime)
+                    makeToast(getString(R.string.pixiv_artwork_queued, artwork.media.size))
+                    finish()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (throwable: Throwable) {
+                    pixivShareState = PixivShareState.Error(throwable)
+                }
+            }
+    }
+
     private fun resolveRedditPost() {
         redditJob?.cancel()
         redditShareState = RedditShareState.LoadingPost
@@ -380,7 +456,7 @@ class QuickDownloadActivity : ComponentActivity() {
                         )
                     tasks.forEach(downloader::enqueue)
                     val remainingIndicatorTime =
-                        MIN_REDDIT_INDICATOR_MILLIS -
+                        MIN_COMPACT_INDICATOR_MILLIS -
                             (SystemClock.elapsedRealtime() - indicatorStartedAt)
                     if (remainingIndicatorTime > 0) delay(remainingIndicatorTime)
                     makeToast(
@@ -459,8 +535,17 @@ class QuickDownloadActivity : ComponentActivity() {
         finish()
     }
 
+    private fun openPixivSignIn() {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_OPEN_PIXIV_LOGIN, true)
+        )
+        finish()
+    }
+
     override fun onDestroy() {
         redditJob?.cancel()
+        pixivJob?.cancel()
         super.onDestroy()
     }
 
@@ -472,5 +557,11 @@ class QuickDownloadActivity : ComponentActivity() {
         data class ScanningFeed(val progress: RedditMediaResolver.FeedProgress) : RedditShareState
 
         data class Error(val throwable: Throwable) : RedditShareState
+    }
+
+    private sealed interface PixivShareState {
+        data object LoadingArtwork : PixivShareState
+
+        data class Error(val throwable: Throwable) : PixivShareState
     }
 }

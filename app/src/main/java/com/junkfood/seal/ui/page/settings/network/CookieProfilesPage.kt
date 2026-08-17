@@ -328,6 +328,18 @@ fun CookieProfilePage(
                 }
             }
             item {
+                PreferenceItemVariant(
+                    title = stringResource(id = R.string.pixiv_sign_in),
+                    description = stringResource(id = R.string.pixiv_sign_in_desc),
+                    icon = Icons.Outlined.Login,
+                ) {
+                    cookiesViewModel.setEditingProfile(
+                        CookieProfile(id = 0, url = PIXIV_LOGIN_URL, content = "")
+                    )
+                    navigateToCookieGeneratorPage()
+                }
+            }
+            item {
                 androidx.compose.material3.HorizontalDivider()
                 val cookiesCount = cookieList.size
                 val siteCount = cookieList.distinctBy { it.domain }.size
