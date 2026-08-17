@@ -64,6 +64,51 @@ class DownloadQueuePresentationTest {
         )
     }
 
+    @Test
+    fun completedPixivArtworkUsesFirstLocalFileAsItsTimelineThumbnail() {
+        val pixiv = pixivTask("image/jpeg", "image/png")
+        val state =
+            Task.State(
+                Completed(
+                    filePath = "content://media/pixiv/first.jpg",
+                    filePaths =
+                        listOf(
+                            "content://media/pixiv/first.jpg",
+                            "content://media/pixiv/second.png",
+                        ),
+                ),
+                null,
+                Task.ViewState(thumbnailUrl = "https://i.pximg.net/remote.jpg"),
+            )
+
+        assertEquals("content://media/pixiv/first.jpg", pixiv.thumbnailModelForQueue(state))
+    }
+
+    @Test
+    fun incompletePixivArtworkKeepsRemoteThumbnailUntilLocalMediaExists() {
+        val pixiv = pixivTask("image/jpeg")
+        val state =
+            Task.State(
+                Running(Job(), pixiv.id),
+                null,
+                Task.ViewState(thumbnailUrl = "https://i.pximg.net/remote.jpg"),
+            )
+
+        assertEquals("https://i.pximg.net/remote.jpg", pixiv.thumbnailModelForQueue(state))
+    }
+
+    @Test
+    fun pixivImagesAndAnimationsAreCountedByTheirActualMediaTypes() {
+        val pixiv = pixivTask("image/jpeg", "image/png", "video/mp4")
+        val state = state(Completed("content://media/pixiv/first.jpg"))
+
+        val counts = mapOf(pixiv to state).queueMediaCounts()
+
+        assertEquals(2, counts.imageCount)
+        assertEquals(1, counts.videoCount)
+        assertEquals(0, counts.audioCount)
+    }
+
     private fun task(name: String) =
         Task(url = name, preferences = DownloadUtil.DownloadPreferences.EMPTY)
 
@@ -79,5 +124,32 @@ class DownloadQueuePresentationTest {
             caption = id,
             index = index,
             total = 2,
+        )
+
+    private fun pixivTask(vararg mimeTypes: String): Task =
+        Task(
+            url = "https://www.pixiv.net/artworks/12345",
+            type =
+                Task.TypeInfo.PixivArtwork(
+                    artworkId = "12345",
+                    title = "Artwork",
+                    artist = "Artist",
+                    artistId = "67890",
+                    sourceUrl = "https://www.pixiv.net/artworks/12345",
+                    createdAtMillis = 1L,
+                    items =
+                        mimeTypes.mapIndexed { index, mimeType ->
+                            val extension = if (mimeType == "video/mp4") "mp4" else "jpg"
+                            Task.TypeInfo.PixivMediaItem(
+                                mediaId = "12345_${index + 1}",
+                                mediaUrl = "https://i.pximg.net/$index.$extension",
+                                mimeType = mimeType,
+                                extension = extension,
+                                index = index + 1,
+                                total = mimeTypes.size,
+                            )
+                        },
+                ),
+            preferences = DownloadUtil.DownloadPreferences.EMPTY,
         )
 }

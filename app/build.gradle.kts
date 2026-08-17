@@ -177,6 +177,7 @@ dependencies {
     implementation(libs.bundles.accompanist)
 
     implementation(libs.coil.kt.compose)
+    implementation(libs.coil.kt.video)
 
     implementation(libs.kotlinx.serialization.json)
 

@@ -3,10 +3,30 @@ package com.junkfood.seal.download
 import com.junkfood.seal.download.Task.TypeInfo.PixivArtwork
 import com.junkfood.seal.download.Task.TypeInfo.PixivMediaItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PixivMediaDownloaderTest {
+    @Test
+    fun completeOriginalAssetRequiresEveryAdvertisedByte() {
+        PixivMediaDownloader.requireCompleteDownload(
+            expectedBytes = 19_000_000L,
+            downloadedBytes = 19_000_000L,
+        )
+        PixivMediaDownloader.requireCompleteDownload(
+            expectedBytes = -1L,
+            downloadedBytes = 3_000_000L,
+        )
+
+        assertThrows(java.io.IOException::class.java) {
+            PixivMediaDownloader.requireCompleteDownload(
+                expectedBytes = 19_000_000L,
+                downloadedBytes = 5_000_000L,
+            )
+        }
+    }
+
     @Test
     fun multipageNamesStayTogetherAndSortLexically() {
         val artwork = artwork(total = 22)

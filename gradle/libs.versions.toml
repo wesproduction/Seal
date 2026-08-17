@@ -85,6 +85,7 @@ androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espres
 
 
 coil-kt-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+coil-kt-video = { group = "io.coil-kt", name = "coil-video", version.ref = "coil" }
 
 junit4 = { group = "junit", name = "junit", version.ref = "junit4" }
 

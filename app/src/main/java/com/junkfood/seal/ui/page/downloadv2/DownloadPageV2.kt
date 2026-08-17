@@ -460,30 +460,8 @@ fun DownloadPageImplV2(
                 ) {
                     if (filteredMap.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
-                            var imageCount = 0
-                            var videoCount = 0
-                            var audioCount = 0
-                            filteredMap.forEach { (task, state) ->
-                                when (val type = task.type) {
-                                    is Task.TypeInfo.RedditAlbum -> {
-                                        imageCount +=
-                                            type.items.count { it.mimeType.startsWith("image/") }
-                                        videoCount +=
-                                            type.items.count { it.mimeType.startsWith("video/") }
-                                    }
-
-                                    is Task.TypeInfo.RedditMedia -> {
-                                        if (type.mimeType.startsWith("image/")) imageCount++
-                                        else videoCount++
-                                    }
-
-                                    else -> {
-                                        if (!state.viewState.videoFormats.isNullOrEmpty())
-                                            videoCount++
-                                        else audioCount++
-                                    }
-                                }
-                            }
+                            val (imageCount, videoCount, audioCount) =
+                                filteredMap.queueMediaCounts()
                             SubHeader(
                                 modifier = Modifier,
                                 videoCount = videoCount,
@@ -504,7 +482,8 @@ fun DownloadPageImplV2(
                             with(state.viewState) {
                                 VideoCardV2(
                                     modifier = Modifier.padding(bottom = 20.dp).padding(),
-                                    viewState = this,
+                                    viewState =
+                                        copy(thumbnailUrl = task.thumbnailModelForQueue(state)),
                                     actionButton = {
                                         ActionButton(
                                             modifier = Modifier,
@@ -540,7 +519,10 @@ fun DownloadPageImplV2(
                         ) { (task, state) ->
                             VideoListItem(
                                 modifier = Modifier.padding(bottom = 16.dp),
-                                viewState = state.viewState,
+                                viewState =
+                                    state.viewState.copy(
+                                        thumbnailUrl = task.thumbnailModelForQueue(state)
+                                    ),
                                 stateIndicator = {
                                     ListItemStateText(
                                         modifier = Modifier.padding(top = 3.dp),
@@ -607,6 +589,43 @@ internal fun List<Pair<Task, Task.State>>.sortedForQueueDisplay(): List<Pair<Tas
             else 0
         }
     }
+
+internal fun Task.thumbnailModelForQueue(state: Task.State): String? {
+    val completed = state.downloadState as? Completed
+    return if (type is Task.TypeInfo.PixivArtwork && completed != null)
+        completed.orderedFilePaths.firstOrNull() ?: state.viewState.thumbnailUrl
+    else state.viewState.thumbnailUrl
+}
+
+internal data class QueueMediaCounts(val imageCount: Int, val videoCount: Int, val audioCount: Int)
+
+internal fun Map<Task, Task.State>.queueMediaCounts(): QueueMediaCounts {
+    var imageCount = 0
+    var videoCount = 0
+    var audioCount = 0
+    forEach { (task, state) ->
+        when (val type = task.type) {
+            is Task.TypeInfo.RedditAlbum -> {
+                imageCount += type.items.count { it.mimeType.startsWith("image/") }
+                videoCount += type.items.count { it.mimeType.startsWith("video/") }
+            }
+
+            is Task.TypeInfo.RedditMedia -> {
+                if (type.mimeType.startsWith("image/")) imageCount++ else videoCount++
+            }
+
+            is Task.TypeInfo.PixivArtwork -> {
+                imageCount += type.items.count { it.mimeType.startsWith("image/") }
+                videoCount += type.items.count { it.mimeType.startsWith("video/") }
+            }
+
+            else -> {
+                if (!state.viewState.videoFormats.isNullOrEmpty()) videoCount++ else audioCount++
+            }
+        }
+    }
+    return QueueMediaCounts(imageCount, videoCount, audioCount)
+}
 
 @Composable
 fun Header(modifier: Modifier = Modifier, onMenuOpen: () -> Unit = {}) {

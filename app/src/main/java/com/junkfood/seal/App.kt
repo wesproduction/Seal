@@ -14,6 +14,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.content.getSystemService
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
 import com.google.android.material.color.DynamicColors
 import com.junkfood.seal.download.DownloaderV2
 import com.junkfood.seal.download.DownloaderV2Impl
@@ -54,7 +57,10 @@ import org.koin.core.context.startKoin
 import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
 
-class App : Application() {
+class App : Application(), ImageLoaderFactory {
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this).components { add(VideoFrameDecoder.Factory()) }.build()
+
     override fun onCreate() {
         super.onCreate()
         MMKV.initialize(this)

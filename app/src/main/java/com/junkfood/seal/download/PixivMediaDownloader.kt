@@ -211,7 +211,17 @@ object PixivMediaDownloader {
                 }
             }
             if (downloaded <= 0L) throw IOException("Pixiv returned an empty media file")
+            requireCompleteDownload(totalBytes, downloaded)
             return downloaded
+        }
+    }
+
+    internal fun requireCompleteDownload(expectedBytes: Long, downloadedBytes: Long) {
+        if (expectedBytes >= 0L && expectedBytes != downloadedBytes) {
+            throw IOException(
+                "Pixiv media download was incomplete: expected $expectedBytes bytes, received " +
+                    "$downloadedBytes bytes"
+            )
         }
     }
 

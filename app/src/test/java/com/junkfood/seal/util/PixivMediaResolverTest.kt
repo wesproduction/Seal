@@ -40,6 +40,7 @@ class PixivMediaResolverTest {
         assertEquals(listOf("12345_p0", "12345_p1", "12345_p2"), artwork.media.map { it.id })
         assertEquals(listOf(1, 2, 3), artwork.media.map { it.index })
         assertEquals(listOf("jpg", "png", "gif"), artwork.media.map { it.extension })
+        assertTrue(artwork.media.all { "/img-original/" in it.mediaUrl })
 
         val task =
             TaskFactory.createFromPixivArtwork(artwork, DownloadUtil.DownloadPreferences.EMPTY)
