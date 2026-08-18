@@ -109,6 +109,33 @@ class DownloadQueuePresentationTest {
         assertEquals(0, counts.audioCount)
     }
 
+    @Test
+    fun completedWebCollectionUsesLocalThumbnailAndPreviewsEveryImage() {
+        val webTask = webImageTask()
+        val completed =
+            Completed(
+                filePath = "content://media/web/first.jpg",
+                filePaths =
+                    listOf("content://media/web/first.jpg", "content://media/web/second.png"),
+            )
+        val state =
+            Task.State(
+                completed,
+                null,
+                Task.ViewState(thumbnailUrl = "https://cdn.example.com/remote.jpg"),
+            )
+
+        assertEquals("content://media/web/first.jpg", webTask.thumbnailModelForQueue(state))
+        assertEquals(
+            listOf(PreviewMediaKind.Image, PreviewMediaKind.Image),
+            webTask.createMediaPreview(completed, "")?.items?.map { it.kind },
+        )
+        val counts = mapOf(webTask to state).queueMediaCounts()
+        assertEquals(2, counts.imageCount)
+        assertEquals(0, counts.videoCount)
+        assertEquals(0, counts.audioCount)
+    }
+
     private fun task(name: String) =
         Task(url = name, preferences = DownloadUtil.DownloadPreferences.EMPTY)
 
@@ -149,6 +176,40 @@ class DownloadQueuePresentationTest {
                                 total = mimeTypes.size,
                             )
                         },
+                ),
+            preferences = DownloadUtil.DownloadPreferences.EMPTY,
+        )
+
+    private fun webImageTask(): Task =
+        Task(
+            url = "https://example.com/gallery",
+            type =
+                Task.TypeInfo.WebImageCollection(
+                    pageId = "page-id",
+                    pageTitle = "Gallery",
+                    siteName = "example.com",
+                    sourceUrl = "https://example.com/gallery",
+                    items =
+                        listOf(
+                            Task.TypeInfo.WebImageItem(
+                                mediaId = "first",
+                                mediaUrl = "https://cdn.example.com/first.jpg",
+                                mimeType = "image/jpeg",
+                                extension = "jpg",
+                                caption = "First",
+                                index = 1,
+                                total = 2,
+                            ),
+                            Task.TypeInfo.WebImageItem(
+                                mediaId = "second",
+                                mediaUrl = "https://cdn.example.com/second.png",
+                                mimeType = "image/png",
+                                extension = "png",
+                                caption = "Second",
+                                index = 2,
+                                total = 2,
+                            ),
+                        ),
                 ),
             preferences = DownloadUtil.DownloadPreferences.EMPTY,
         )

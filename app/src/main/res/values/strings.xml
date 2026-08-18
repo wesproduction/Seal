@@ -213,6 +213,7 @@
     <string name="pixiv_sign_in_desc">Sign in inside Walrus, then tap Save cookies so private and age-restricted artwork can be downloaded.</string>
     <string name="pixiv_download_error">Couldn’t read this Pixiv artwork</string>
     <string name="pixiv_artwork_queued">Pixiv artwork added as one download (%1$d media files)</string>
+    <string name="web_images_queued">Page images added as one download (%1$d images)</string>
     <string name="reddit_feed_confirm_title">Download all media from %1$s?</string>
     <string name="reddit_feed_confirm_desc">Walrus Downloader will scan up to %1$d accessible posts, newest first, and queue every image, gallery, and video it can find. Files will be ordered under Walrus Reddit/%2$s. Reddit may limit older history. This can use substantial time, data, and storage.</string>
     <string name="reddit_feed_download_all">Download all</string>

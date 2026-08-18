@@ -19,6 +19,7 @@ androidxTestExt = "1.1.4"
 coil = "2.5.0"
 
 junit4 = "4.13.2"
+jsoup = "1.23.1"
 
 kotlin = "2.0.20"
 
@@ -88,6 +89,7 @@ coil-kt-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "
 coil-kt-video = { group = "io.coil-kt", name = "coil-video", version.ref = "coil" }
 
 junit4 = { group = "junit", name = "junit", version.ref = "junit4" }
+jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "datetime" }

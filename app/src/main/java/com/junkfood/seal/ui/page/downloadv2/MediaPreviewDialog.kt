@@ -75,6 +75,7 @@ internal fun Task.createMediaPreview(completed: Completed, title: String): Media
             is Task.TypeInfo.RedditAlbum -> taskType.items.map { it.mimeType }
             is Task.TypeInfo.RedditMedia -> listOf(taskType.mimeType)
             is Task.TypeInfo.PixivArtwork -> taskType.items.map { it.mimeType }
+            is Task.TypeInfo.WebImageCollection -> taskType.items.map { it.mimeType }
             else -> emptyList()
         }
     val items =
@@ -93,6 +94,7 @@ private fun Task.titleForPreview(): String =
         is Task.TypeInfo.RedditAlbum -> taskType.postTitle
         is Task.TypeInfo.RedditMedia -> taskType.postTitle
         is Task.TypeInfo.PixivArtwork -> taskType.title
+        is Task.TypeInfo.WebImageCollection -> taskType.pageTitle
         else -> url
     }
 

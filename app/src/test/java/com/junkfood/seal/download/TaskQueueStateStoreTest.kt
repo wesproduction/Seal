@@ -138,6 +138,40 @@ class TaskQueueStateStoreTest {
     }
 
     @Test
+    fun webImageCollectionSurvivesQueueBackupSerialization() {
+        val webTask =
+            Task(
+                url = "https://example.com/gallery",
+                type =
+                    Task.TypeInfo.WebImageCollection(
+                        pageId = "page-id",
+                        pageTitle = "Gallery",
+                        siteName = "example.com",
+                        sourceUrl = "https://example.com/gallery",
+                        items =
+                            listOf(
+                                Task.TypeInfo.WebImageItem(
+                                    mediaId = "first",
+                                    mediaUrl = "https://cdn.example.com/original.jpg",
+                                    mimeType = "image/jpeg",
+                                    extension = "jpg",
+                                    caption = "First",
+                                    index = 1,
+                                    total = 1,
+                                )
+                            ),
+                    ),
+                preferences = DownloadUtil.DownloadPreferences.EMPTY,
+            )
+
+        val restored = Json.decodeFromString<Task>(Json.encodeToString(webTask))
+        val collection = restored.type as Task.TypeInfo.WebImageCollection
+
+        assertEquals(webTask.id, restored.id)
+        assertEquals("https://cdn.example.com/original.jpg", collection.items.single().mediaUrl)
+    }
+
+    @Test
     fun completedAlbumKeepsItsOrderedPathsAndCompletionTimeWhenSerialized() {
         val completed =
             Completed(

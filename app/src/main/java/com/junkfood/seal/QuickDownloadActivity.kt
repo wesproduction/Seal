@@ -65,6 +65,7 @@ import com.junkfood.seal.util.DownloadUtil
 import com.junkfood.seal.util.PixivMediaResolver
 import com.junkfood.seal.util.PreferenceUtil
 import com.junkfood.seal.util.RedditMediaResolver
+import com.junkfood.seal.util.WebImageResolver
 import com.junkfood.seal.util.makeToast
 import com.junkfood.seal.util.matchUrlFromSharedText
 import com.junkfood.seal.util.setLanguage
@@ -88,6 +89,7 @@ class QuickDownloadActivity : ComponentActivity() {
     private var redditShareState by mutableStateOf<RedditShareState>(RedditShareState.LoadingPost)
     private var pixivJob: Job? = null
     private var pixivShareState by mutableStateOf<PixivShareState>(PixivShareState.LoadingArtwork)
+    private var webImageJob: Job? = null
 
     private fun Intent.getSharedURL(): String? {
         val intent = this
@@ -155,6 +157,51 @@ class QuickDownloadActivity : ComponentActivity() {
             return
         }
 
+        showWebImageShareHandler()
+        resolveWebImagePage()
+    }
+
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
+    private fun showWebImageShareHandler() {
+        setContent {
+            SettingsProvider(calculateWindowSizeClass(this).widthSizeClass) {
+                SealTheme(
+                    darkTheme = LocalDarkTheme.current.isDarkTheme(),
+                    isHighContrastModeEnabled = LocalDarkTheme.current.isHighContrastModeEnabled,
+                ) {
+                    CompactDownloadIndicator("webImageDownload")
+                }
+            }
+        }
+    }
+
+    private fun resolveWebImagePage() {
+        webImageJob?.cancel()
+        webImageJob =
+            lifecycleScope.launch {
+                val indicatorStartedAt = SystemClock.elapsedRealtime()
+                val page = runCatching { WebImageResolver.resolve(sharedUrlCached) }.getOrNull()
+                if (page == null || !page.isImageFocused || page.hasVideoMetadata) {
+                    showRegularDownloadHandler()
+                    return@launch
+                }
+                val task =
+                    TaskFactory.createFromWebImagePage(
+                        page = page,
+                        preferences = DownloadUtil.DownloadPreferences.createFromPreferences(),
+                    )
+                downloader.enqueue(task)
+                val remainingIndicatorTime =
+                    MIN_COMPACT_INDICATOR_MILLIS -
+                        (SystemClock.elapsedRealtime() - indicatorStartedAt)
+                if (remainingIndicatorTime > 0) delay(remainingIndicatorTime)
+                makeToast(getString(R.string.web_images_queued, page.media.size))
+                finish()
+            }
+    }
+
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class, ExperimentalMaterial3Api::class)
+    private fun showRegularDownloadHandler() {
         val viewModel: DownloadDialogViewModel = getViewModel()
         viewModel.postAction(Action.ShowSheet(listOf(sharedUrlCached)))
 
@@ -169,14 +216,10 @@ class QuickDownloadActivity : ComponentActivity() {
                     }
 
                     val sheetValue = viewModel.sheetValueFlow.collectAsStateWithLifecycle().value
-
                     val state = viewModel.sheetStateFlow.collectAsStateWithLifecycle().value
-
                     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
                     val selectionState =
                         viewModel.selectionStateFlow.collectAsStateWithLifecycle().value
-
                     var showDialog by remember { mutableStateOf(false) }
 
                     LaunchedEffect(sheetValue, selectionState) {
@@ -546,6 +589,7 @@ class QuickDownloadActivity : ComponentActivity() {
     override fun onDestroy() {
         redditJob?.cancel()
         pixivJob?.cancel()
+        webImageJob?.cancel()
         super.onDestroy()
     }
 

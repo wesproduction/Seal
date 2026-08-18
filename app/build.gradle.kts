@@ -178,6 +178,7 @@ dependencies {
 
     implementation(libs.coil.kt.compose)
     implementation(libs.coil.kt.video)
+    implementation(libs.jsoup)
 
     implementation(libs.kotlinx.serialization.json)
 

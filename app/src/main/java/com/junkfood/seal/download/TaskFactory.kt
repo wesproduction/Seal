@@ -10,6 +10,7 @@ import com.junkfood.seal.util.PlaylistResult
 import com.junkfood.seal.util.RedditMediaResolver
 import com.junkfood.seal.util.VideoClip
 import com.junkfood.seal.util.VideoInfo
+import com.junkfood.seal.util.WebImageResolver
 import kotlin.math.roundToInt
 
 object TaskFactory {
@@ -215,6 +216,51 @@ object TaskFactory {
                             uploader = artwork.artist,
                             extractorKey = "Pixiv",
                             thumbnailUrl = artwork.thumbnailUrl,
+                        ),
+                ),
+        )
+    }
+
+    @CheckResult
+    fun createFromWebImagePage(
+        page: WebImageResolver.WebImagePage,
+        preferences: DownloadPreferences,
+    ): TaskWithState {
+        val type =
+            Task.TypeInfo.WebImageCollection(
+                pageId = page.id,
+                pageTitle = page.title,
+                siteName = page.siteName,
+                sourceUrl = page.canonicalUrl,
+                items =
+                    page.media.map { media ->
+                        Task.TypeInfo.WebImageItem(
+                            mediaId = media.id,
+                            mediaUrl = media.mediaUrl,
+                            mimeType = media.mimeType,
+                            extension = media.extension,
+                            caption = media.caption,
+                            index = media.index,
+                            total = media.total,
+                        )
+                    },
+            )
+        val label =
+            if (type.items.size == 1) page.title
+            else "${page.title} · ${type.items.size}-image page"
+        return TaskWithState(
+            task = Task(url = page.canonicalUrl, type = type, preferences = preferences),
+            state =
+                Task.State(
+                    downloadState = ReadyWithInfo,
+                    videoInfo = null,
+                    viewState =
+                        Task.ViewState(
+                            url = page.canonicalUrl,
+                            title = label,
+                            uploader = page.siteName,
+                            extractorKey = "Web images",
+                            thumbnailUrl = page.media.firstOrNull()?.mediaUrl,
                         ),
                 ),
         )

@@ -592,7 +592,10 @@ internal fun List<Pair<Task, Task.State>>.sortedForQueueDisplay(): List<Pair<Tas
 
 internal fun Task.thumbnailModelForQueue(state: Task.State): String? {
     val completed = state.downloadState as? Completed
-    return if (type is Task.TypeInfo.PixivArtwork && completed != null)
+    return if (
+        (type is Task.TypeInfo.PixivArtwork || type is Task.TypeInfo.WebImageCollection) &&
+            completed != null
+    )
         completed.orderedFilePaths.firstOrNull() ?: state.viewState.thumbnailUrl
     else state.viewState.thumbnailUrl
 }
@@ -617,6 +620,10 @@ internal fun Map<Task, Task.State>.queueMediaCounts(): QueueMediaCounts {
             is Task.TypeInfo.PixivArtwork -> {
                 imageCount += type.items.count { it.mimeType.startsWith("image/") }
                 videoCount += type.items.count { it.mimeType.startsWith("video/") }
+            }
+
+            is Task.TypeInfo.WebImageCollection -> {
+                imageCount += type.items.count { it.mimeType.startsWith("image/") }
             }
 
             else -> {

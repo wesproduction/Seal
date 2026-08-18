@@ -22,6 +22,7 @@ private val TypeInfo.id: String
             is TypeInfo.RedditMedia ->
                 "reddit_${collectionName.orEmpty()}_${collectionIndex}_${postId}_${index}_${mediaId}"
             is TypeInfo.PixivArtwork -> "pixiv_$artworkId"
+            is TypeInfo.WebImageCollection -> "web_images_$pageId"
             TypeInfo.URL -> ""
         }
 
@@ -121,6 +122,26 @@ data class Task(
         }
 
         @Serializable data class PixivUgoiraFrame(val file: String, val delayMillis: Int)
+
+        @Serializable
+        data class WebImageCollection(
+            val pageId: String,
+            val pageTitle: String,
+            val siteName: String,
+            val sourceUrl: String,
+            val items: List<WebImageItem>,
+        ) : TypeInfo
+
+        @Serializable
+        data class WebImageItem(
+            val mediaId: String,
+            val mediaUrl: String,
+            val mimeType: String,
+            val extension: String,
+            val caption: String,
+            val index: Int,
+            val total: Int,
+        )
 
         @Serializable data object URL : TypeInfo
     }

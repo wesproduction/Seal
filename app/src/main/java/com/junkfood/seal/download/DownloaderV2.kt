@@ -248,7 +248,8 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
         } else if (
             type is TypeInfo.RedditMedia ||
                 type is TypeInfo.RedditAlbum ||
-                type is TypeInfo.PixivArtwork
+                type is TypeInfo.PixivArtwork ||
+                type is TypeInfo.WebImageCollection
         ) {
             downloadState = ReadyWithInfo
         } else {
@@ -315,6 +316,10 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
         }
         if (type is TypeInfo.PixivArtwork) {
             downloadPixiv(type)
+            return
+        }
+        if (type is TypeInfo.WebImageCollection) {
+            downloadWebImages(type)
             return
         }
         check(info != null)
@@ -536,6 +541,99 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
             scope.launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
                 PixivMediaDownloader.downloadArtwork(
                         artwork = artwork,
+                        preferences = preferences,
+                        progressCallback = { progressPercentage, downloadedBytes, text ->
+                            val progress =
+                                if (progressPercentage < 0f) -1f else progressPercentage / 100f
+                            val update =
+                                queueState.update(task) { current ->
+                                    val preState = current.downloadState
+                                    if (preState !is Running) current
+                                    else
+                                        current.copy(
+                                            downloadState =
+                                                preState.copy(
+                                                    progress = progress,
+                                                    progressText = text,
+                                                ),
+                                            viewState =
+                                                current.viewState.copy(
+                                                    fileSizeApprox = downloadedBytes.toDouble()
+                                                ),
+                                        )
+                                }
+                            if (update?.previous?.downloadState is Running) {
+                                NotificationUtil.notifyProgress(
+                                    notificationId = notificationId,
+                                    progress = progressPercentage.coerceAtLeast(0f).toInt(),
+                                    text = text,
+                                    title = update.previous.viewState.title,
+                                    taskId = id,
+                                )
+                            }
+                        },
+                    )
+                    .onSuccess { pathList ->
+                        val update =
+                            queueState.update(task) { current ->
+                                if (current.downloadState !is Running) current
+                                else
+                                    current.copy(
+                                        downloadState =
+                                            Completed(
+                                                filePath = pathList.firstOrNull(),
+                                                filePaths = pathList,
+                                            )
+                                    )
+                            }
+                        if (update?.previous?.downloadState !is Running) return@onSuccess
+                        FileUtil.createIntentForOpeningFile(pathList.firstOrNull()).run {
+                            NotificationUtil.finishNotification(
+                                notificationId = notificationId,
+                                title = update.previous.viewState.title,
+                                text = appContext.getString(R.string.download_finish_notification),
+                                intent =
+                                    if (this != null)
+                                        PendingIntent.getActivity(
+                                            appContext,
+                                            0,
+                                            this,
+                                            PendingIntent.FLAG_IMMUTABLE,
+                                        )
+                                    else null,
+                            )
+                        }
+                    }
+                    .onFailure { throwable ->
+                        val update =
+                            queueState.update(task) { current ->
+                                if (current.downloadState !is Running) current
+                                else
+                                    current.copy(
+                                        downloadState =
+                                            Error(throwable = throwable, action = Download)
+                                    )
+                            }
+                        if (update?.previous?.downloadState is Running) {
+                            NotificationUtil.notifyError(
+                                title = update.previous.viewState.title,
+                                textId = R.string.download_error_msg,
+                                notificationId = notificationId,
+                                report = throwable.stackTraceToString(),
+                            )
+                        }
+                    }
+            }
+        downloadState = Running(job = job, taskId = id)
+        job.start()
+    }
+
+    private fun Task.downloadWebImages(collection: TypeInfo.WebImageCollection) {
+        val task = this
+        val job =
+            scope.launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
+                WebImageDownloader.downloadCollection(
+                        collection = collection,
                         preferences = preferences,
                         progressCallback = { progressPercentage, downloadedBytes, text ->
                             val progress =
