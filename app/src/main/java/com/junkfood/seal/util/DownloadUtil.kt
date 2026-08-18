@@ -38,6 +38,7 @@ import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.youtubedl_android.YoutubeDLResponse
 import java.io.File
+import java.net.URI
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -108,8 +109,9 @@ object DownloadUtil {
                 addOption("--flat-playlist")
                 addOption("--dump-single-json")
                 addOption("-o", BASENAME)
-                addOption("-R", "1")
-                addOption("--socket-timeout", "5")
+                addOption("-R", "3")
+                addOption("--retry-sleep", "linear=1::2")
+                addOption("--socket-timeout", "20")
                 downloadPreferences.run {
                     if (extractAudio) {
                         addOption("-x")
@@ -121,7 +123,7 @@ object DownloadUtil {
                     if (forceIpv4) {
                         addOption("-4")
                     }
-                    if (cookies) {
+                    if (cookies || hasSavedCookiesFor(playlistURL)) {
                         enableCookies(userAgentString)
                     }
                     if (restrictFilenames) {
@@ -166,7 +168,7 @@ object DownloadUtil {
                         addOption("-x")
                     }
                     applyFormatSorter(this@with, toFormatSorter())
-                    if (cookies) {
+                    if (cookies || hasSavedCookiesFor(url)) {
                         enableCookies(userAgentString)
                     }
                     if (proxy) {
@@ -189,10 +191,11 @@ object DownloadUtil {
                         addOption("--dump-json")
                     } else {
                         addOption("--dump-single-json")
+                        addOption("--no-playlist")
                     }
-                    addOption("-R", "1")
-                    addOption("--no-playlist")
-                    addOption("--socket-timeout", "5")
+                    addOption("-R", "3")
+                    addOption("--retry-sleep", "linear=1::2")
+                    addOption("--socket-timeout", "20")
                 }
             return getVideoInfo(request, taskKey)
         }
@@ -252,6 +255,7 @@ object DownloadUtil {
         val mergeAudioStream: Boolean,
         val mergeToMkv: Boolean,
         val redditSeparatePostFolders: Boolean = false,
+        val organizeMusicLibrary: Boolean = false,
     ) {
         companion object {
             val EMPTY =
@@ -308,6 +312,7 @@ object DownloadUtil {
                     mergeToMkv = false,
                     redditSeparatePostFolders = false,
                     useCustomAudioPreset = false,
+                    organizeMusicLibrary = false,
                 )
 
             fun createFromPreferences(): DownloadPreferences {
@@ -368,6 +373,7 @@ object DownloadUtil {
                     mergeToMkv =
                         (downloadSubtitle && embedSubtitle) || MERGE_OUTPUT_MKV.getBoolean(),
                     redditSeparatePostFolders = REDDIT_SEPARATE_POST_FOLDERS.getBoolean(),
+                    organizeMusicLibrary = false,
                 )
             }
         }
@@ -379,6 +385,18 @@ object DownloadUtil {
                 addOption("--add-header", "User-Agent:$userAgentString")
             }
         }
+
+    internal fun hasSavedCookiesFor(
+        url: String,
+        cookieText: String = runCatching { context.getCookiesFile().readText() }.getOrDefault(""),
+    ): Boolean {
+        val host = runCatching { URI(url).host?.lowercase(Locale.ROOT) }.getOrNull() ?: return false
+        return cookieText.lineSequence().any { line ->
+            if (line.isBlank() || line.startsWith("#")) return@any false
+            val domain = line.substringBefore('\t').trim().removePrefix(".").lowercase(Locale.ROOT)
+            domain.isNotBlank() && (host == domain || host.endsWith(".$domain"))
+        }
+    }
 
     private fun YoutubeDLRequest.enableProxy(proxyUrl: String): YoutubeDLRequest =
         this.addOption("--proxy", proxyUrl)
@@ -547,6 +565,7 @@ object DownloadUtil {
         id: String,
         preferences: DownloadPreferences,
         playlistUrl: String,
+        organizeMusicLibrary: Boolean,
     ): YoutubeDLRequest =
         this.apply {
             with(preferences) {
@@ -590,24 +609,54 @@ object DownloadUtil {
                     applyFormatSorter(preferences, toAudioFormatSorter())
                 }
 
-                if (embedMetadata) {
+                if (embedMetadata || organizeMusicLibrary) {
                     addOption("--embed-metadata")
                     addOption("--embed-thumbnail")
                     addOption("--convert-thumbnails", "jpg")
 
-                    if (cropArtwork) {
+                    if (organizeMusicLibrary) {
+                        val configFile = context.getConfigFile("music_$id")
+                        FileUtil.writeContentToFile(
+                            MusicDownloadPolicy.SQUARE_ARTWORK_CONFIG,
+                            configFile,
+                        )
+                        addOption("--config", configFile.absolutePath)
+                    } else if (cropArtwork) {
                         val configFile = context.getConfigFile(id)
                         FileUtil.writeContentToFile(CROP_ARTWORK_COMMAND, configFile)
                         addOption("--config", configFile.absolutePath)
                     }
                 }
-                addOption("--parse-metadata", "%(release_year,upload_date)s:%(meta_date)s")
-
-                if (playlistUrl.isNotEmpty()) {
-                    addOption("--parse-metadata", "%(album,playlist,title)s:%(meta_album)s")
-                    addOption("--parse-metadata", "%(track_number,playlist_index)d:%(meta_track)s")
+                if (organizeMusicLibrary) {
+                    addOption("--parse-metadata", "%(track,title)s:%(meta_title)s")
+                    addOption(
+                        "--parse-metadata",
+                        "%(artist,album_artist,uploader,channel|Unknown Artist)s:%(meta_artist)s",
+                    )
+                    addOption(
+                        "--parse-metadata",
+                        "%(album_artist,artist,uploader,channel|Unknown Artist)s:%(meta_album_artist)s",
+                    )
+                    addOption("--parse-metadata", "%(album,playlist|Singles)s:%(meta_album)s")
+                    addOption(
+                        "--parse-metadata",
+                        "%(track_number,playlist_index|1)s:%(meta_track)s",
+                    )
+                    addOption("--parse-metadata", "%(disc_number|1)s:%(meta_disc)s")
+                    addOption(
+                        "--parse-metadata",
+                        "%(release_year,release_date>%Y,upload_date>%Y)s:%(meta_date)s",
+                    )
+                    addOption("--parse-metadata", "%(genre)s:%(meta_genre)s")
                 } else {
-                    addOption("--parse-metadata", "%(album,title)s:%(meta_album)s")
+                    addOption("--parse-metadata", "%(release_year,upload_date)s:%(meta_date)s")
+                    if (playlistUrl.isNotEmpty()) {
+                        addOption("--parse-metadata", "%(album,playlist,title)s:%(meta_album)s")
+                        addOption(
+                            "--parse-metadata",
+                            "%(track_number,playlist_index)d:%(meta_track)s",
+                        )
+                    }
                 }
             }
         }
@@ -667,12 +716,18 @@ object DownloadUtil {
             val request = YoutubeDLRequest(url).enableJavascriptRuntime()
             val pathBuilder = StringBuilder()
             val outputBuilder = StringBuilder()
+            val organizeMusicLibrary =
+                MusicDownloadPolicy.shouldOrganize(
+                    info = videoInfo,
+                    preferences = downloadPreferences,
+                    sourceUrl = url,
+                )
 
             request
                 .apply {
                     addOption("--no-mtime")
                     //                addOption("-v")
-                    if (cookies) {
+                    if (cookies || hasSavedCookiesFor(url)) {
                         enableCookies(userAgentString)
                     }
                     if (restrictFilenames) {
@@ -729,6 +784,7 @@ object DownloadUtil {
                             id = videoInfo.id,
                             preferences = downloadPreferences,
                             playlistUrl = playlistUrl,
+                            organizeMusicLibrary = organizeMusicLibrary,
                         )
                     } else {
                         if (privateDirectory) pathBuilder.append(App.privateDownloadDir)
@@ -774,7 +830,8 @@ object DownloadUtil {
                         if (splitByChapter) {
                             OUTPUT_TEMPLATE_SPLIT
                         } else if (videoClips.isEmpty()) {
-                            outputTemplate
+                            if (organizeMusicLibrary) MusicDownloadPolicy.OUTPUT_TEMPLATE
+                            else outputTemplate
                         } else {
                             OUTPUT_TEMPLATE_CLIPS
                         }

@@ -335,6 +335,7 @@ object TaskFactory {
                         newTitle = newTitle,
                         mergeAudioStream = mergeAudioStream,
                         extractAudio = extractAudio || audioOnly,
+                        organizeMusicLibrary = extractAudio || audioOnly,
                     )
                 }
                 .run {

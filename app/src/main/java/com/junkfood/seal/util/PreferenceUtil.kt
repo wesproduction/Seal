@@ -107,6 +107,7 @@ const val AV1_HARDWARE_ACCELERATED = "av1_hardware_accelerated"
 const val FORCE_IPV4 = "force_ipv4"
 const val MERGE_OUTPUT_MKV = "merge_to_mkv"
 const val USE_CUSTOM_AUDIO_PRESET = "custom_audio_preset"
+const val MUSIC_LISTENING_HISTORY = "music_listening_history"
 
 const val MERGE_MULTI_AUDIO_STREAM = "multi_audio_stream"
 
@@ -575,21 +576,21 @@ object PreferenceStrings {
                 }
 
                 !useCustomAudioPreset -> {
-                    stringResource(R.string.best_quality)
+                    stringResource(R.string.audio_format_best)
                 }
 
                 convertAudio -> {
                     when (audioConvertFormat) {
-                        CONVERT_MP3 -> stringResource(R.string.convert_to, "MP3")
-                        else -> stringResource(R.string.convert_to, "M4A")
+                        CONVERT_MP3 -> "MP3"
+                        else -> "M4A / AAC"
                     }
                 }
 
                 else -> {
                     val preferredFormat =
                         when (audioFormat) {
-                            M4A -> stringResource(R.string.prefer_placeholder, "M4A")
-                            OPUS -> stringResource(R.string.prefer_placeholder, "OPUS")
+                            M4A -> "M4A / AAC"
+                            OPUS -> "Opus"
                             else -> null
                         }
                     val preferredQuality =

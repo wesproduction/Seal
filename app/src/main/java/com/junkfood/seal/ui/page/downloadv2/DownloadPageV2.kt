@@ -2,6 +2,7 @@ package com.junkfood.seal.ui.page.downloadv2
 
 import android.content.Intent
 import android.content.res.Configuration
+import android.provider.Settings
 import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.animateTo
 import androidx.compose.animation.rememberSplineBasedDecay
@@ -52,6 +53,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
@@ -83,6 +85,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.constraintlayout.compose.ConstraintLayout
+import androidx.core.app.NotificationManagerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.junkfood.seal.R
 import com.junkfood.seal.download.DownloaderV2
@@ -94,6 +100,8 @@ import com.junkfood.seal.download.Task.DownloadState.FetchingInfo
 import com.junkfood.seal.download.Task.DownloadState.Idle
 import com.junkfood.seal.download.Task.DownloadState.ReadyWithInfo
 import com.junkfood.seal.download.Task.DownloadState.Running
+import com.junkfood.seal.music.ListenedTrack
+import com.junkfood.seal.music.MusicHistoryStore
 import com.junkfood.seal.ui.common.HapticFeedback.slightHapticFeedback
 import com.junkfood.seal.ui.common.LocalDarkTheme
 import com.junkfood.seal.ui.common.LocalFixedColorRoles
@@ -114,6 +122,9 @@ import com.junkfood.seal.ui.svg.drawablevectors.download
 import com.junkfood.seal.ui.theme.SealTheme
 import com.junkfood.seal.util.DownloadUtil
 import com.junkfood.seal.util.FileUtil
+import com.junkfood.seal.util.MUSIC_LISTENING_HISTORY
+import com.junkfood.seal.util.PreferenceUtil.getBoolean
+import com.junkfood.seal.util.PreferenceUtil.updateBoolean
 import com.junkfood.seal.util.getErrorReport
 import com.junkfood.seal.util.makeToast
 import kotlinx.coroutines.CoroutineScope
@@ -131,6 +142,7 @@ private const val TAG = "DownloadPageV2"
 
 enum class Filter {
     All,
+    Music,
     Downloading,
     Canceled,
     Finished;
@@ -140,6 +152,7 @@ enum class Filter {
     fun label(): String =
         when (this) {
             All -> stringResource(R.string.all)
+            Music -> stringResource(R.string.music)
             Downloading -> stringResource(R.string.status_downloading)
             Canceled -> stringResource(R.string.status_canceled)
             Finished -> stringResource(R.string.status_completed)
@@ -149,6 +162,7 @@ enum class Filter {
         if (this == All) return true
         val state = entry.second.downloadState
         return when (this) {
+            Music -> entry.isMusicTask()
             Downloading -> {
                 when (state) {
                     is FetchingInfo,
@@ -206,7 +220,66 @@ fun DownloadPageV2(
     val uriHandler = LocalUriHandler.current
 
     val taskDownloadStateMap by downloader.taskStateFlow.collectAsStateWithLifecycle()
+    val listenedTracks by MusicHistoryStore.tracks.collectAsStateWithLifecycle()
     var mediaPreview by remember { mutableStateOf<MediaPreviewState?>(null) }
+    var listeningEnabled by remember { mutableStateOf(MUSIC_LISTENING_HISTORY.getBoolean()) }
+    var notificationAccessGranted by remember { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun refreshNotificationAccess() {
+        notificationAccessGranted =
+            NotificationManagerCompat.getEnabledListenerPackages(context)
+                .contains(context.packageName)
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshNotificationAccess()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        refreshNotificationAccess()
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(taskDownloadStateMap, listenedTracks) {
+        listenedTracks
+            .filter { it.downloadedAt == null }
+            .forEach { track ->
+                val completed =
+                    taskDownloadStateMap.entries
+                        .firstOrNull { it.key.url == track.downloadTarget }
+                        ?.value
+                        ?.downloadState as? Completed
+                if (completed != null) {
+                    MusicHistoryStore.markDownloaded(
+                        track.key,
+                        completed.orderedFilePaths.firstOrNull(),
+                    )
+                }
+            }
+    }
+
+    fun enqueueListenedTrack(track: ListenedTrack) {
+        val existing =
+            taskDownloadStateMap.entries.firstOrNull { it.key.url == track.downloadTarget }
+        if (existing != null) {
+            if (existing.value.downloadState is Error || existing.value.downloadState is Canceled) {
+                downloader.restart(existing.key)
+            }
+            return
+        }
+        val preferences =
+            DownloadUtil.DownloadPreferences.createFromPreferences()
+                .copy(
+                    extractAudio = true,
+                    organizeMusicLibrary = true,
+                    embedMetadata = true,
+                    cropArtwork = true,
+                    useDownloadArchive = true,
+                    downloadPlaylist = false,
+                )
+        downloader.enqueue(Task(url = track.downloadTarget, preferences = preferences))
+    }
 
     DownloadPageImplV2(
         modifier = modifier,
@@ -216,6 +289,30 @@ fun DownloadPageV2(
             dialogViewModel.postAction(Action.ShowSheet())
         },
         onMenuOpen = onMenuOpen,
+        listenedTracks = listenedTracks,
+        listeningEnabled = listeningEnabled,
+        notificationAccessGranted = notificationAccessGranted,
+        onListeningEnabledChange = { enabled ->
+            listeningEnabled = enabled
+            MUSIC_LISTENING_HISTORY.updateBoolean(enabled)
+            if (enabled && !notificationAccessGranted) {
+                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+        },
+        onOpenNotificationAccess = {
+            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        },
+        onDownloadTrack = ::enqueueListenedTrack,
+        onDownloadToday = { tracks -> tracks.forEach(::enqueueListenedTrack) },
+        onRemoveListenedTrack = { MusicHistoryStore.remove(it.key) },
+        onClearPendingHistory = MusicHistoryStore::clearPending,
+        onOpenListenedTrack = { track, path ->
+            mediaPreview =
+                MediaPreviewState(
+                    title = track.title,
+                    items = listOf(PreviewMediaItem(path, mimeTypeFromPath(path))),
+                )
+        },
     ) { task, action ->
         view.slightHapticFeedback()
         when (action) {
@@ -343,6 +440,16 @@ fun DownloadPageImplV2(
     taskDownloadStateMap: Map<Task, Task.State>,
     downloadCallback: () -> Unit = {},
     onMenuOpen: (() -> Unit) = {},
+    listenedTracks: List<ListenedTrack> = emptyList(),
+    listeningEnabled: Boolean = false,
+    notificationAccessGranted: Boolean = false,
+    onListeningEnabledChange: (Boolean) -> Unit = {},
+    onOpenNotificationAccess: () -> Unit = {},
+    onDownloadTrack: (ListenedTrack) -> Unit = {},
+    onDownloadToday: (List<ListenedTrack>) -> Unit = {},
+    onRemoveListenedTrack: (ListenedTrack) -> Unit = {},
+    onClearPendingHistory: () -> Unit = {},
+    onOpenListenedTrack: (ListenedTrack, String) -> Unit = { _, _ -> },
     onActionPost: (Task, UiAction) -> Unit,
 ) {
     var activeFilter by remember { mutableStateOf(Filter.All) }
@@ -449,52 +556,106 @@ fun DownloadPageImplV2(
                     }
                 }
 
-                LazyVerticalGrid(
-                    modifier = Modifier,
-                    state = lazyListState,
-                    columns = GridCells.Adaptive(240.dp),
-                    contentPadding =
-                        windowInsetsPadding +
-                            PaddingValues(start = 20.dp, end = 20.dp, bottom = 80.dp),
-                    horizontalArrangement = Arrangement.spacedBy(24.dp),
-                ) {
-                    if (filteredMap.isNotEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            val (imageCount, videoCount, audioCount) =
-                                filteredMap.queueMediaCounts()
-                            SubHeader(
-                                modifier = Modifier,
-                                videoCount = videoCount,
-                                audioCount = audioCount,
-                                imageCount = imageCount,
-                                isGridView = isGridView,
-                                onToggleView = { isGridView = !isGridView },
-                                onShowMenu = { context.makeToast("Not implemented yet!") },
-                            )
+                if (activeFilter == Filter.Music) {
+                    MusicLibraryContent(
+                        modifier = Modifier.weight(1f),
+                        contentPadding =
+                            windowInsetsPadding +
+                                PaddingValues(start = 20.dp, end = 20.dp, bottom = 80.dp),
+                        musicTasks = filteredMap,
+                        listenedTracks = listenedTracks,
+                        listeningEnabled = listeningEnabled,
+                        notificationAccessGranted = notificationAccessGranted,
+                        onListeningEnabledChange = onListeningEnabledChange,
+                        onOpenNotificationAccess = onOpenNotificationAccess,
+                        onDownloadTrack = onDownloadTrack,
+                        onDownloadToday = onDownloadToday,
+                        onRemoveTrack = onRemoveListenedTrack,
+                        onClearPending = onClearPendingHistory,
+                        onOpenTrackPath = onOpenListenedTrack,
+                        onOpenTask = { task, completed ->
+                            onActionPost(task, UiAction.OpenFile(completed.filePath))
+                        },
+                        onShowTaskActions = ::showActionSheet,
+                    )
+                } else
+                    LazyVerticalGrid(
+                        modifier = Modifier,
+                        state = lazyListState,
+                        columns = GridCells.Adaptive(240.dp),
+                        contentPadding =
+                            windowInsetsPadding +
+                                PaddingValues(start = 20.dp, end = 20.dp, bottom = 80.dp),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    ) {
+                        if (filteredMap.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                val (imageCount, videoCount, audioCount) =
+                                    filteredMap.queueMediaCounts()
+                                SubHeader(
+                                    modifier = Modifier,
+                                    videoCount = videoCount,
+                                    audioCount = audioCount,
+                                    imageCount = imageCount,
+                                    isGridView = isGridView,
+                                    onToggleView = { isGridView = !isGridView },
+                                    onShowMenu = { context.makeToast("Not implemented yet!") },
+                                )
+                            }
                         }
-                    }
 
-                    if (isGridView) {
-                        items(
-                            items = filteredMap.toList().sortedForQueueDisplay(),
-                            key = { (task, _) -> task.id },
-                        ) { (task, state) ->
-                            with(state.viewState) {
-                                VideoCardV2(
-                                    modifier = Modifier.padding(bottom = 20.dp).padding(),
+                        if (isGridView) {
+                            items(
+                                items = filteredMap.toList().sortedForQueueDisplay(),
+                                key = { (task, _) -> task.id },
+                            ) { (task, state) ->
+                                with(state.viewState) {
+                                    VideoCardV2(
+                                        modifier = Modifier.padding(bottom = 20.dp).padding(),
+                                        viewState =
+                                            copy(thumbnailUrl = task.thumbnailModelForQueue(state)),
+                                        actionButton = {
+                                            ActionButton(
+                                                modifier = Modifier,
+                                                downloadState = state.downloadState,
+                                            ) {
+                                                onActionPost(task, it)
+                                            }
+                                        },
+                                        stateIndicator = {
+                                            CardStateIndicator(
+                                                modifier = Modifier,
+                                                downloadState = state.downloadState,
+                                            )
+                                        },
+                                        onClick =
+                                            (state.downloadState as? Completed)?.let { completed ->
+                                                {
+                                                    onActionPost(
+                                                        task,
+                                                        UiAction.OpenFile(completed.filePath),
+                                                    )
+                                                }
+                                            },
+                                        onButtonClick = { showActionSheet(task) },
+                                    )
+                                }
+                            }
+                        } else {
+                            items(
+                                items = filteredMap.toList().sortedForQueueDisplay(),
+                                key = { (task, _) -> task.id },
+                                span = { GridItemSpan(maxLineSpan) },
+                            ) { (task, state) ->
+                                VideoListItem(
+                                    modifier = Modifier.padding(bottom = 16.dp),
                                     viewState =
-                                        copy(thumbnailUrl = task.thumbnailModelForQueue(state)),
-                                    actionButton = {
-                                        ActionButton(
-                                            modifier = Modifier,
-                                            downloadState = state.downloadState,
-                                        ) {
-                                            onActionPost(task, it)
-                                        }
-                                    },
+                                        state.viewState.copy(
+                                            thumbnailUrl = task.thumbnailModelForQueue(state)
+                                        ),
                                     stateIndicator = {
-                                        CardStateIndicator(
-                                            modifier = Modifier,
+                                        ListItemStateText(
+                                            modifier = Modifier.padding(top = 3.dp),
                                             downloadState = state.downloadState,
                                         )
                                     },
@@ -511,41 +672,10 @@ fun DownloadPageImplV2(
                                 )
                             }
                         }
-                    } else {
-                        items(
-                            items = filteredMap.toList().sortedForQueueDisplay(),
-                            key = { (task, _) -> task.id },
-                            span = { GridItemSpan(maxLineSpan) },
-                        ) { (task, state) ->
-                            VideoListItem(
-                                modifier = Modifier.padding(bottom = 16.dp),
-                                viewState =
-                                    state.viewState.copy(
-                                        thumbnailUrl = task.thumbnailModelForQueue(state)
-                                    ),
-                                stateIndicator = {
-                                    ListItemStateText(
-                                        modifier = Modifier.padding(top = 3.dp),
-                                        downloadState = state.downloadState,
-                                    )
-                                },
-                                onClick =
-                                    (state.downloadState as? Completed)?.let { completed ->
-                                        {
-                                            onActionPost(
-                                                task,
-                                                UiAction.OpenFile(completed.filePath),
-                                            )
-                                        }
-                                    },
-                                onButtonClick = { showActionSheet(task) },
-                            )
-                        }
                     }
-                }
             }
         }
-        if (filteredMap.isEmpty()) {
+        if (filteredMap.isEmpty() && activeFilter != Filter.Music) {
             Box(modifier = Modifier.fillMaxSize()) {
                 DownloadQueuePlaceholder(
                     modifier =
@@ -575,6 +705,14 @@ fun DownloadPageImplV2(
             )
         }
     }
+}
+
+internal fun Pair<Task, Task.State>.isMusicTask(): Boolean {
+    val (task, state) = this
+    if (task.preferences.extractAudio || task.preferences.organizeMusicLibrary) return true
+    if (state.videoInfo?.vcodec == "none") return true
+    val completed = state.downloadState as? Completed ?: return false
+    return completed.orderedFilePaths.any { mimeTypeFromPath(it).startsWith("audio/") }
 }
 
 internal fun List<Pair<Task, Task.State>>.sortedForQueueDisplay(): List<Pair<Task, Task.State>> =

@@ -20,6 +20,7 @@ import coil.decode.VideoFrameDecoder
 import com.google.android.material.color.DynamicColors
 import com.junkfood.seal.download.DownloaderV2
 import com.junkfood.seal.download.DownloaderV2Impl
+import com.junkfood.seal.music.MusicHistoryStore
 import com.junkfood.seal.ui.page.download.HomePageViewModel
 import com.junkfood.seal.ui.page.downloadv2.configure.DownloadDialogViewModel
 import com.junkfood.seal.ui.page.settings.directory.Directory
@@ -64,6 +65,7 @@ class App : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         MMKV.initialize(this)
+        MusicHistoryStore.initialize(this)
 
         startKoin {
             androidLogger()

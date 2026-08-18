@@ -149,7 +149,11 @@ fun PlaylistSelectionPage(
                 },
                 onDismissRequest = onDismissConfigurationSheet,
                 onDownload = {
-                    val preferences = preferences.copy(extractAudio = it == Audio)
+                    val preferences =
+                        preferences.copy(
+                            extractAudio = it == Audio,
+                            organizeMusicLibrary = it == Audio,
+                        )
                     taskList
                         .map { it.copy(task = it.task.copy(preferences = preferences)) }
                         .forEach(downloader::enqueue)

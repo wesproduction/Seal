@@ -389,7 +389,11 @@ private fun DownloadDialogContent(
                         onActionPost(
                             Action.DownloadWithPreset(
                                 urlList = state.urlList,
-                                preferences = preferences.copy(extractAudio = it == Audio),
+                                preferences =
+                                    preferences.copy(
+                                        extractAudio = it == Audio,
+                                        organizeMusicLibrary = it == Audio,
+                                    ),
                             )
                         )
                     }
@@ -640,7 +644,11 @@ private fun ConfigurePage(
                 onActionPost(
                     Action.DownloadWithPreset(
                         urlList = listOf(url),
-                        preferences = preferences.copy(extractAudio = selectedType == Audio),
+                        preferences =
+                            preferences.copy(
+                                extractAudio = selectedType == Audio,
+                                organizeMusicLibrary = selectedType == Audio,
+                            ),
                     )
                 )
             },
