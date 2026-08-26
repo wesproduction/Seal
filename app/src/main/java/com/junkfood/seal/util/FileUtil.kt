@@ -104,18 +104,63 @@ object FileUtil {
         }
 
     @CheckResult
-    fun scanFileToMediaLibraryPostDownload(title: String, downloadDir: String): List<String> =
-        File(downloadDir)
-            .walkTopDown()
-            .filter { it.isFile && it.absolutePath.contains(title) }
-            .map { it.absolutePath }
+    fun scanFileToMediaLibraryPostDownload(
+        title: String,
+        downloadDir: String,
+        outputTemplate: String = "",
+    ): List<String> =
+        findFilesPostDownload(
+                title = title,
+                downloadDir = downloadDir,
+                outputTemplate = outputTemplate,
+            )
             .toMutableList()
             .apply {
-                MediaScannerConnection.scanFile(context, this.toList().toTypedArray(), null, null)
+                MediaScannerConnection.scanFile(context, toTypedArray(), null, null)
                 removeAll {
                     it.contains(Regex(THUMBNAIL_REGEX)) || it.contains(Regex(SUBTITLE_REGEX))
                 }
             }
+
+    /**
+     * Resolve yt-dlp's final output without assuming that its pre-download filename survived a
+     * custom output template. Reddit downloads, for example, deliberately use the Reddit post ID in
+     * the final name while yt-dlp reports the hosted-media ID in [title].
+     *
+     * The literal prefix before the first yt-dlp template field is deterministic and is therefore
+     * preferred when it is available. Regular templates normally start with a template field, so
+     * they retain the established filename lookup as their fallback.
+     */
+    internal fun findFilesPostDownload(
+        title: String,
+        downloadDir: String,
+        outputTemplate: String = "",
+    ): List<String> {
+        val root = File(downloadDir)
+        val files = root.walkTopDown().filter(File::isFile).toList()
+        val literalTemplatePrefix =
+            outputTemplate
+                .replace('\\', '/')
+                .substringBefore("%(")
+                .trimStart('/')
+                .takeIf(String::isNotBlank)
+
+        val templateMatches =
+            literalTemplatePrefix
+                ?.let { prefix ->
+                    files.filter { file ->
+                        runCatching {
+                                file.relativeTo(root).invariantSeparatorsPath.startsWith(prefix)
+                            }
+                            .getOrDefault(false)
+                    }
+                }
+                .orEmpty()
+
+        return (templateMatches.ifEmpty { files.filter { it.absolutePath.contains(title) } }).map(
+            File::getAbsolutePath
+        )
+    }
 
     fun scanDownloadDirectoryToMediaLibrary(downloadDir: String) =
         File(downloadDir)

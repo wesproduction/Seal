@@ -901,6 +901,7 @@ object DownloadUtil {
                 FileUtil.scanFileToMediaLibraryPostDownload(
                         title = fileName,
                         downloadDir = downloadPath,
+                        outputTemplate = outputTemplate,
                     )
                     .run {
                         if (privateMode) Result.success(emptyList())
