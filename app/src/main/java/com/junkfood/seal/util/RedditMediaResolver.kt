@@ -55,6 +55,7 @@ object RedditMediaResolver {
         val isVideoPost: Boolean = false,
         val comments: List<RedditComment> = emptyList(),
         val totalCommentCount: Int = comments.size,
+        val commentsLoaded: Boolean = false,
     ) {
         val isDirectMediaPost: Boolean
             get() = media.isNotEmpty()
@@ -252,6 +253,7 @@ object RedditMediaResolver {
             .copy(
                 comments = comments,
                 totalCommentCount = post["num_comments"]?.jsonPrimitive?.intOrNull ?: comments.size,
+                commentsLoaded = true,
             )
     }
 

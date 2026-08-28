@@ -15,23 +15,20 @@ class RedditMediaDownloaderTest {
             "Album [post] - 10 - A_ caption_.jpg",
             RedditMediaDownloader.orderedFileName(tenth),
         )
-        assertEquals(
-            "Album [post] - 01 - media-1.jpg",
-            RedditMediaDownloader.orderedFileName(first),
-        )
+        assertEquals("Album [post] - 01.jpg", RedditMediaDownloader.orderedFileName(first))
     }
 
     @Test
-    fun separatePostFolderOptionKeepsCompactLegacyItemNames() {
+    fun separatePostFoldersStillNameEveryFileForItsPost() {
         val tenth = media(index = 10, total = 12, caption = "A: caption?")
         val first = media(index = 1, total = 12, caption = "")
 
         assertEquals(
-            "10 - A_ caption_.jpg",
+            "Album [post] - 10 - A_ caption_.jpg",
             RedditMediaDownloader.orderedFileName(tenth, separatePostFolders = true),
         )
         assertEquals(
-            "01 - media-1.jpg",
+            "Album [post] - 01.jpg",
             RedditMediaDownloader.orderedFileName(first, separatePostFolders = true),
         )
     }
@@ -41,8 +38,13 @@ class RedditMediaDownloaderTest {
         val media =
             media(index = 1, total = 1, caption = "")
                 .copy(collectionName = "Android_Pics", collectionIndex = 4, collectionTotal = 120)
+        val albumPage = media.copy(index = 2, total = 12)
 
         assertEquals("004 - Album [post].jpg", RedditMediaDownloader.orderedFileName(media))
+        assertEquals(
+            "004 - Album [post] - 02.jpg",
+            RedditMediaDownloader.orderedFileName(albumPage),
+        )
         assertEquals("Android_Pics", RedditMediaDownloader.redditRelativeDirectory(media))
         assertEquals(
             "Android_Pics/004 - Album [post]",

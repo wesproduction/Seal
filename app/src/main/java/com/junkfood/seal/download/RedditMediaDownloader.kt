@@ -370,22 +370,21 @@ object RedditMediaDownloader {
         return baseTimestamp + (media.total - media.index) * 1000L
     }
 
+    @Suppress("UNUSED_PARAMETER")
     internal fun orderedFileName(media: RedditMedia, separatePostFolders: Boolean = false): String {
         val extension = media.extension.lowercase().ifBlank { "jpg" }
-        if (separatePostFolders && media.total <= 1) {
-            return "${sanitizeFileName(media.postTitle)} [${media.postId}].$extension"
-        }
         val width = media.total.toString().length.coerceAtLeast(2)
-        val itemName = sanitizeFileName(media.caption.ifBlank { media.mediaId }).take(72)
-        if (separatePostFolders) {
-            return "%0${width}d - %s.%s".format(media.index, itemName, extension)
-        }
         val postName = flatPostName(media)
-        return if (media.total <= 1) {
-            "$postName.$extension"
-        } else {
-            "$postName - %0${width}d - $itemName.$extension".format(media.index)
-        }
+        if (media.total <= 1) return "$postName.$extension"
+
+        val captionSuffix =
+            media.caption
+                .takeIf(String::isNotBlank)
+                ?.let(::sanitizeFileName)
+                ?.take(72)
+                ?.let { " - $it" }
+                .orEmpty()
+        return "$postName - %0${width}d$captionSuffix.$extension".format(media.index)
     }
 
     internal fun sanitizeFileName(value: String): String =

@@ -80,6 +80,7 @@ class RedditMediaResolverTest {
             )
         val tasks = TaskFactory.createFromRedditFeed(feed, DownloadUtil.DownloadPreferences.EMPTY)
         assertEquals(2, tasks.size)
+        assertTrue(tasks.all { it.task.redditPost == null })
         val galleryAlbum = tasks.first().task.type as Task.TypeInfo.RedditAlbum
         assertEquals(listOf("second", "first"), galleryAlbum.items.map { it.mediaId })
         assertEquals("pics", galleryAlbum.collectionName)
@@ -95,13 +96,9 @@ class RedditMediaResolverTest {
                 feed,
                 DownloadUtil.DownloadPreferences.EMPTY.copy(redditSeparatePostFolders = true),
             )
-        assertTrue(
-            separateTasks
-                .last()
-                .task
-                .preferences
-                .outputTemplate
-                .startsWith("Walrus Reddit/pics/02 - Native video [video1]/")
+        assertEquals(
+            "Walrus Reddit/pics/02 - Native video [video1]/02 - Native video [video1].%(ext)s",
+            separateTasks.last().task.preferences.outputTemplate,
         )
     }
 
@@ -126,6 +123,7 @@ class RedditMediaResolverTest {
             )
 
         assertEquals(4, post.totalCommentCount)
+        assertTrue(post.commentsLoaded)
         assertEquals(listOf("top", "reply", "second"), post.comments.map { it.id })
         assertEquals(listOf(0, 1, 0), post.comments.map { it.depth })
         assertEquals("Unicode comment: こんにちは", post.comments[1].body)

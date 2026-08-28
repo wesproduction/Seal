@@ -29,7 +29,7 @@ class RedditPostArchiveInstrumentedTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val resolver = context.contentResolver
         val downloads = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/Walrus Downloader/Walrus Reddit QA/"
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/Walrus Downloader/"
         val imageName = "walrus-reddit-comments-device-qa.jpg"
         val post =
             Task.RedditPostMetadata(
@@ -144,20 +144,6 @@ class RedditPostArchiveInstrumentedTest {
         } finally {
             transcriptUri?.let { resolver.delete(it, null, null) }
             imageUri?.let { resolver.delete(it, null, null) }
-            var attempts = 0
-            while (attempts < 20) {
-                val directoryUri =
-                    findDownload(
-                        "${Environment.DIRECTORY_DOWNLOADS}/Walrus Downloader/",
-                        "Walrus Reddit QA",
-                    )
-                if (directoryUri != null) {
-                    resolver.delete(directoryUri, null, null)
-                    break
-                }
-                Thread.sleep(50)
-                attempts++
-            }
         }
     }
 

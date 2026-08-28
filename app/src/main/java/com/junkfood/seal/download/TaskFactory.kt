@@ -162,8 +162,9 @@ object TaskFactory {
         }
     }
 
-    private fun RedditMediaResolver.RedditPost.toTaskMetadata(): Task.RedditPostMetadata =
-        Task.RedditPostMetadata(
+    private fun RedditMediaResolver.RedditPost.toTaskMetadata(): Task.RedditPostMetadata? {
+        if (!commentsLoaded) return null
+        return Task.RedditPostMetadata(
             postId = id,
             postTitle = title,
             author = author,
@@ -183,6 +184,7 @@ object TaskFactory {
                 },
             totalCommentCount = totalCommentCount,
         )
+    }
 
     private fun collectionLabel(collection: RedditCollection?, label: String): String =
         collection?.let {
@@ -324,10 +326,8 @@ object TaskFactory {
                 collection?.name?.let(RedditMediaDownloader::sanitizeFileName)?.let(::add)
                 if (separatePostFolders) {
                     add(postFolder)
-                    add("%(title)s [%(id)s].%(ext)s")
-                } else {
-                    add("$postFolder.%(ext)s")
                 }
+                add("$postFolder.%(ext)s")
             }
             .joinToString("/")
     }
