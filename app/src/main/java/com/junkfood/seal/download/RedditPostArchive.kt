@@ -26,8 +26,10 @@ import kotlinx.coroutines.withContext
 /** Adds a portable Reddit discussion archive to media without changing its pixels or codecs. */
 object RedditPostArchive {
     private const val TAG = "RedditPostArchive"
-    private const val MAX_EMBEDDED_UTF8_BYTES = 16_000
-    private const val MAX_IMAGE_DESCRIPTION_CHARS = 12_000
+    // Google Photos limits its own media-item descriptions to 1,000 characters. Keep the
+    // portable file caption within the same budget so caption-aware viewers never receive an
+    // oversized, unreadable wall of text. The complete discussion remains in the transcript.
+    private const val MAX_PORTABLE_CAPTION_CHARACTERS = 1_000
     private val transcriptMutex = Mutex()
 
     suspend fun attach(
@@ -39,15 +41,15 @@ object RedditPostArchive {
             if (mediaPaths.isEmpty()) return@withContext
             val transcriptName = transcriptFileName(post)
             val transcript = buildTranscript(post)
-            val embedded =
-                buildEmbeddedDescription(
+            val caption =
+                buildPortableCaption(
                     post = post,
                     transcriptName = transcriptName,
-                    maxUtf8Bytes = MAX_EMBEDDED_UTF8_BYTES,
+                    maxCharacters = MAX_PORTABLE_CAPTION_CHARACTERS,
                 )
 
             mediaPaths.forEach { path ->
-                runCatching { attachToMedia(path, post, embedded) }
+                runCatching { attachToMedia(path, post, caption) }
                     .onFailure { throwable ->
                         Log.w(TAG, "Unable to embed Reddit comments in $path", throwable)
                     }
@@ -114,33 +116,61 @@ object RedditPostArchive {
         }
     }
 
-    internal fun buildEmbeddedDescription(
+    internal fun buildPortableCaption(
         post: Task.RedditPostMetadata,
         transcriptName: String = transcriptFileName(post),
-        maxUtf8Bytes: Int = MAX_EMBEDDED_UTF8_BYTES,
+        maxCharacters: Int = MAX_PORTABLE_CAPTION_CHARACTERS,
     ): String {
-        val value = buildString {
-            appendLine("Reddit comments · ${post.comments.size} of ${post.totalCommentCount} saved")
+        val heading = buildString {
             appendLine(post.postTitle)
             appendLine("Posted by ${redditAuthor(post.author)}")
-            appendLine(post.sourceUrl)
-            appendLine("Full transcript: $transcriptName")
             appendLine()
-            post.comments.forEach { comment ->
+            appendLine("Comments (${post.comments.size} of ${post.totalCommentCount}, top order)")
+        }
+        val comments = buildString {
+            if (post.comments.isEmpty()) {
+                appendLine("No comments were available when Walrus downloaded this post.")
+            }
+            post.comments.forEachIndexed { index, comment ->
                 append("  ".repeat(comment.depth.coerceIn(0, 12)))
+                append(index + 1)
+                append(". ")
                 append(redditAuthor(comment.author))
-                append(" · ")
+                append(" (")
                 append(comment.score)
-                appendLine(" points")
-                append("  ".repeat(comment.depth.coerceIn(0, 12)))
-                appendLine(comment.body)
+                appendLine(" points)")
+                comment.body.lineSequence().forEach { line ->
+                    append("  ".repeat(comment.depth.coerceIn(0, 12)))
+                    append("   ")
+                    appendLine(line)
+                }
                 appendLine()
             }
-            if (post.comments.isEmpty()) {
-                append("No comments were available when Walrus downloaded this post.")
+            if (post.totalCommentCount > post.comments.size) {
+                appendLine(
+                    "Reddit reported ${post.totalCommentCount} comments; the remaining comments " +
+                        "are in the full transcript."
+                )
             }
         }
-        return truncateUtf8(value, maxUtf8Bytes)
+        val footer = buildString {
+            appendLine()
+            appendLine("Full comments: $transcriptName")
+            append("Source: ${post.sourceUrl}")
+        }
+        val reservedFooterCharacters = codePointCount(footer)
+        val contentBudget = (maxCharacters - reservedFooterCharacters).coerceAtLeast(0)
+        val captionBody =
+            truncateCodePoints(
+                value = heading + comments,
+                maxCharacters = contentBudget,
+                truncationNotice = "\n[More comments are in the full transcript.]\n",
+            )
+        return truncateCodePoints(
+            value = captionBody.trimEnd() + footer,
+            maxCharacters = maxCharacters,
+            truncationNotice = "",
+        )
     }
 
     internal fun transcriptFileName(post: Task.RedditPostMetadata): String =
@@ -150,40 +180,41 @@ object RedditPostArchive {
     private suspend fun attachToMedia(
         path: String,
         post: Task.RedditPostMetadata,
-        embeddedDescription: String,
+        caption: String,
     ) {
         val target = resolveMediaTarget(path)
         when {
-            target.mimeType.startsWith("image/") ->
-                attachImageMetadata(target, post, embeddedDescription)
-            target.mimeType.startsWith("video/") ->
-                attachVideoMetadata(target, post, embeddedDescription)
+            target.mimeType.startsWith("image/") -> attachImageMetadata(target, post, caption)
+            target.mimeType.startsWith("video/") -> attachVideoMetadata(target, post, caption)
         }
     }
 
     private fun attachImageMetadata(
         target: MediaTarget,
         post: Task.RedditPostMetadata,
-        embeddedDescription: String,
+        caption: String,
     ) {
         if (target.mimeType !in setOf("image/jpeg", "image/png", "image/webp")) return
         val originalModified = target.file?.lastModified()?.takeIf { it > 0L }
         val imageDescription =
-            embeddedDescription
-                .map { character ->
-                    if (
-                        character == '\n' ||
-                            character == '\r' ||
-                            character == '\t' ||
-                            character.code in 32..126
-                    ) {
-                        character
-                    } else {
-                        '?'
-                    }
+            caption
+                .lineSequence()
+                .map { line ->
+                    line
+                        .mapNotNull { character ->
+                            when {
+                                character.code in 32..126 -> character
+                                character.isWhitespace() -> ' '
+                                else -> null
+                            }
+                        }
+                        .joinToString("")
+                        .replace(Regex("\\s+"), " ")
+                        .trim()
                 }
-                .joinToString("")
-                .take(MAX_IMAGE_DESCRIPTION_CHARS)
+                .filter(String::isNotBlank)
+                .joinToString(" | ")
+                .take(MAX_PORTABLE_CAPTION_CHARACTERS)
 
         val descriptor = target.uri?.let { context.contentResolver.openFileDescriptor(it, "rw") }
         try {
@@ -194,11 +225,11 @@ object RedditPostArchive {
                     else -> return
                 }
             exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, imageDescription)
-            // EXIF's UserComment encoding is inconsistently implemented by Android gallery
-            // stacks. Keep an ASCII copy for broad compatibility and an XMP dc:description
-            // copy whose XML character references preserve the complete Unicode text.
+            // Android's EXIF writer also serializes UserComment as ASCII on several releases, so
+            // use the same clean compatibility copy there. XMP remains the authoritative Unicode,
+            // line-broken caption.
             exif.setAttribute(ExifInterface.TAG_USER_COMMENT, imageDescription)
-            exif.setAttribute(ExifInterface.TAG_XMP, buildXmpDescription(embeddedDescription))
+            exif.setAttribute(ExifInterface.TAG_XMP, buildXmpDescription(caption))
             post.author.takeIf(String::isNotBlank)?.let {
                 exif.setAttribute(ExifInterface.TAG_ARTIST, redditAuthor(it))
             }
@@ -214,7 +245,7 @@ object RedditPostArchive {
     private suspend fun attachVideoMetadata(
         target: MediaTarget,
         post: Task.RedditPostMetadata,
-        embeddedDescription: String,
+        caption: String,
     ) {
         val input = target.file ?: return
         if (!input.isFile || input.length() <= 0L) return
@@ -241,9 +272,9 @@ object RedditPostArchive {
                     "-metadata",
                     "artist=${redditAuthor(post.author)}",
                     "-metadata",
-                    "description=$embeddedDescription",
+                    "description=$caption",
                     "-metadata",
-                    "comment=$embeddedDescription",
+                    "comment=$caption",
                     "-metadata",
                     "purl=${post.sourceUrl}",
                 )
@@ -498,27 +529,31 @@ object RedditPostArchive {
         }
     }
 
-    private fun truncateUtf8(value: String, maxBytes: Int): String {
-        if (maxBytes <= 0) return ""
-        if (value.toByteArray(StandardCharsets.UTF_8).size <= maxBytes) return value
-        val suffix = "\n\n[More comments are available in the companion transcript file.]"
-        val suffixBytes = suffix.toByteArray(StandardCharsets.UTF_8).size
-        val contentBudget = (maxBytes - suffixBytes).coerceAtLeast(0)
+    private fun truncateCodePoints(
+        value: String,
+        maxCharacters: Int,
+        truncationNotice: String,
+    ): String {
+        if (maxCharacters <= 0) return ""
+        if (codePointCount(value) <= maxCharacters) return value
+        val noticeCharacters = codePointCount(truncationNotice)
+        val contentBudget = (maxCharacters - noticeCharacters).coerceAtLeast(0)
         val builder = StringBuilder()
-        var byteCount = 0
+        var characterCount = 0
         var index = 0
-        while (index < value.length) {
+        while (index < value.length && characterCount < contentBudget) {
             val codePoint = value.codePointAt(index)
-            val text = String(Character.toChars(codePoint))
-            val bytes = text.toByteArray(StandardCharsets.UTF_8).size
-            if (byteCount + bytes <= contentBudget) {
-                builder.append(text)
-                byteCount += bytes
-            }
+            builder.appendCodePoint(codePoint)
+            characterCount++
             index += Character.charCount(codePoint)
         }
-        return builder.append(suffix.takeIf { suffixBytes <= maxBytes }.orEmpty()).toString()
+        return builder
+            .trimEnd()
+            .toString()
+            .plus(truncationNotice.takeIf { noticeCharacters <= maxCharacters }.orEmpty())
     }
+
+    private fun codePointCount(value: String): Int = value.codePointCount(0, value.length)
 
     internal fun buildXmpDescription(description: String): String =
         """

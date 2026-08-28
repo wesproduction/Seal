@@ -1,6 +1,5 @@
 package com.junkfood.seal.download
 
-import java.nio.charset.StandardCharsets
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,7 +20,7 @@ class RedditPostArchiveTest {
     }
 
     @Test
-    fun embeddedDescriptionNamesTheFullTranscriptAndStaysWithinItsUtf8Budget() {
+    fun portableCaptionIsMultilineReadableAndStaysWithinGooglePhotosLimit() {
         val post =
             post()
                 .copy(
@@ -39,16 +38,29 @@ class RedditPostArchiveTest {
                     totalCommentCount = 20,
                 )
         val description =
-            RedditPostArchive.buildEmbeddedDescription(
+            RedditPostArchive.buildPortableCaption(
                 post = post,
                 transcriptName = "A post [abc] - comments.txt",
-                maxUtf8Bytes = 600,
+                maxCharacters = 600,
             )
 
-        assertTrue(description.contains("Full transcript: A post [abc] - comments.txt"))
-        assertTrue(description.contains("More comments are available"))
-        assertTrue(description.toByteArray(StandardCharsets.UTF_8).size <= 600)
+        assertTrue(description.contains("Comments (20 of 20, top order)"))
+        assertTrue(description.contains("\n1. u/user0 (0 points)\n"))
+        assertTrue(description.contains("\n   Long Unicode body"))
+        assertTrue(description.contains("[More comments are in the full transcript.]"))
+        assertTrue(description.contains("Full comments: A post [abc] - comments.txt"))
+        assertTrue(description.contains("Source: https://www.reddit.com/comments/abc"))
+        assertTrue(description.codePointCount(0, description.length) <= 600)
         assertEquals("A post [abc] - comments.txt", RedditPostArchive.transcriptFileName(post))
+    }
+
+    @Test
+    fun portableCaptionIndentsEveryLineOfNestedReplies() {
+        val description = RedditPostArchive.buildPortableCaption(post())
+
+        assertTrue(description.contains("\n1. u/first (42 points)\n   Top comment\n"))
+        assertTrue(description.contains("\n  2. u/reply (7 points)\n     Reply comment\n"))
+        assertTrue(description.contains("Full comments: A post [abc] - comments.txt"))
     }
 
     @Test

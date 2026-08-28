@@ -102,17 +102,40 @@ class RedditPostArchiveInstrumentedTest {
                     val exif = ExifInterface(descriptor.fileDescriptor)
                     assertEquals("Walrus Downloader", exif.getAttribute(ExifInterface.TAG_SOFTWARE))
                     assertEquals("u/walrus_qa", exif.getAttribute(ExifInterface.TAG_ARTIST))
-                    exif.getAttribute(ExifInterface.TAG_USER_COMMENT) to
-                        exif.getAttribute(ExifInterface.TAG_XMP)
+                    Triple(
+                        exif.getAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION),
+                        exif.getAttribute(ExifInterface.TAG_USER_COMMENT),
+                        exif.getAttribute(ExifInterface.TAG_XMP),
+                    )
                 }
-            val description = metadata.first
-            val xmp = metadata.second
+            val indexedCaption = metadata.first
+            val description = metadata.second
+            val xmp = metadata.third
+            assertNotNull("Portable Reddit caption was not embedded", indexedCaption)
+            assertTrue(
+                "Unexpected ImageDescription caption: $indexedCaption",
+                requireNotNull(indexedCaption)
+                    .contains("Comments (2 of 2, top order) | 1. u/first_commenter (42 points)"),
+            )
+            assertTrue(
+                "Unexpected nested ImageDescription caption: $indexedCaption",
+                indexedCaption.contains("2. u/reply_commenter (7 points)"),
+            )
+            assertTrue(
+                "ImageDescription contains replacement characters: $indexedCaption",
+                '?' !in indexedCaption,
+            )
             assertNotNull("Reddit comment metadata was not embedded", description)
             assertTrue(
                 "Unexpected EXIF user comment: $description",
-                requireNotNull(description).contains("First comment with Unicode:"),
+                requireNotNull(description)
+                    .contains("Comments (2 of 2, top order) | 1. u/first_commenter (42 points)"),
             )
             assertTrue(description.contains("Ordered nested reply"))
+            assertTrue(
+                "EXIF UserComment contains replacement characters: $description",
+                '?' !in description,
+            )
             assertNotNull("Unicode XMP Reddit comment metadata was not embedded", xmp)
             val decodedXmp =
                 DocumentBuilderFactory.newInstance()
@@ -129,6 +152,18 @@ class RedditPostArchiveInstrumentedTest {
                 "Unexpected XMP description: $xmp",
                 decodedXmp.contains("First comment with Unicode: こんにちは"),
             )
+            assertTrue(decodedXmp.contains("\n1. u/first_commenter (42 points)\n"))
+            assertTrue(decodedXmp.contains("\n  2. u/reply_commenter (7 points)\n"))
+            val mediaStoreCaption = awaitIndexedCaption(requireNotNull(imageUri))
+            assertNotNull(
+                "Android MediaStore did not index the portable caption",
+                mediaStoreCaption,
+            )
+            assertTrue(
+                requireNotNull(mediaStoreCaption)
+                    .contains("Comments (2 of 2, top order) | 1. u/first_commenter (42 points)")
+            )
+            assertTrue(mediaStoreCaption.contains("Full comments: $transcriptName"))
 
             transcriptUri = findDownload(relativePath, transcriptName)
             assertNotNull("Companion Reddit comment transcript was not published", transcriptUri)
@@ -145,6 +180,31 @@ class RedditPostArchiveInstrumentedTest {
             transcriptUri?.let { resolver.delete(it, null, null) }
             imageUri?.let { resolver.delete(it, null, null) }
         }
+    }
+
+    private fun awaitIndexedCaption(uri: android.net.Uri): String? {
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        repeat(100) {
+            val caption =
+                resolver
+                    .query(
+                        uri,
+                        arrayOf(MediaStore.Images.ImageColumns.DESCRIPTION),
+                        null,
+                        null,
+                        null,
+                    )
+                    ?.use { cursor ->
+                        if (!cursor.moveToFirst()) return@use null
+                        cursor
+                            .getColumnIndex(MediaStore.Images.ImageColumns.DESCRIPTION)
+                            .takeIf { index -> index >= 0 }
+                            ?.let(cursor::getString)
+                    }
+            if (!caption.isNullOrBlank()) return caption
+            Thread.sleep(50)
+        }
+        return null
     }
 
     private fun findDownload(relativePath: String, displayName: String): android.net.Uri? {
