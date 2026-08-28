@@ -38,6 +38,7 @@ data class Task(
     val type: TypeInfo = TypeInfo.URL,
     val preferences: DownloadUtil.DownloadPreferences,
     val id: String = makeId(url, type, preferences),
+    val redditPost: RedditPostMetadata? = null,
 ) : Comparable<Task> {
 
     val timeCreated: Long = System.currentTimeMillis()
@@ -145,6 +146,28 @@ data class Task(
 
         @Serializable data object URL : TypeInfo
     }
+
+    @Serializable
+    data class RedditPostMetadata(
+        val postId: String,
+        val postTitle: String,
+        val author: String,
+        val sourceUrl: String,
+        val createdUtc: Long,
+        val comments: List<RedditComment> = emptyList(),
+        val totalCommentCount: Int = comments.size,
+    )
+
+    @Serializable
+    data class RedditComment(
+        val id: String,
+        val author: String,
+        val body: String,
+        val score: Int,
+        val createdUtc: Long,
+        val depth: Int,
+        val permalink: String = "",
+    )
 
     @Serializable
     data class State(

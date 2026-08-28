@@ -169,6 +169,7 @@ dependencies {
     implementation(project(":color"))
 
     implementation(libs.bundles.core)
+    implementation(libs.androidx.exifinterface)
 
     implementation(libs.androidx.lifecycle.runtimeCompose)
 

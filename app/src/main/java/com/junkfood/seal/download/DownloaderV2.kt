@@ -365,6 +365,16 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
                             }
                         },
                     )
+                    .mapCatching { pathList ->
+                        redditPost?.let { post ->
+                            RedditPostArchive.attach(
+                                post = post,
+                                mediaPaths = pathList,
+                                privateDirectory = preferences.privateDirectory,
+                            )
+                        }
+                        pathList
+                    }
                     .onSuccess { pathList ->
                         val update =
                             queueState.update(task) { current ->
@@ -480,6 +490,16 @@ class DownloaderV2Impl(private val appContext: Context) : DownloaderV2, KoinComp
                         else -> error("Unsupported Reddit task type")
                     }
                 result
+                    .mapCatching { pathList ->
+                        redditPost?.let { post ->
+                            RedditPostArchive.attach(
+                                post = post,
+                                mediaPaths = pathList,
+                                privateDirectory = preferences.privateDirectory,
+                            )
+                        }
+                        pathList
+                    }
                     .onSuccess { pathList ->
                         val update =
                             queueState.update(task) { current ->

@@ -22,6 +22,7 @@ object TaskFactory {
         preferences: DownloadPreferences,
         collection: RedditCollection? = null,
     ): List<TaskWithState> {
+        val postMetadata = post.toTaskMetadata()
         if (!post.isDirectMediaPost) {
             val redditPreferences =
                 preferences.copy(
@@ -34,7 +35,12 @@ object TaskFactory {
                 )
             return listOf(
                 TaskWithState(
-                    task = Task(url = post.canonicalUrl, preferences = redditPreferences),
+                    task =
+                        Task(
+                            url = post.canonicalUrl,
+                            preferences = redditPreferences,
+                            redditPost = postMetadata,
+                        ),
                     state =
                         Task.State(
                             downloadState = Idle,
@@ -82,7 +88,13 @@ object TaskFactory {
                 )
             return listOf(
                 TaskWithState(
-                    task = Task(url = post.canonicalUrl, type = type, preferences = preferences),
+                    task =
+                        Task(
+                            url = post.canonicalUrl,
+                            type = type,
+                            preferences = preferences,
+                            redditPost = postMetadata,
+                        ),
                     state =
                         Task.State(
                             downloadState = ReadyWithInfo,
@@ -123,7 +135,13 @@ object TaskFactory {
                     collectionIndex = collection?.index ?: 0,
                     collectionTotal = collection?.total ?: 0,
                 )
-            val task = Task(url = post.canonicalUrl, type = type, preferences = preferences)
+            val task =
+                Task(
+                    url = post.canonicalUrl,
+                    type = type,
+                    preferences = preferences,
+                    redditPost = postMetadata,
+                )
             TaskWithState(
                 task = task,
                 state =
@@ -143,6 +161,28 @@ object TaskFactory {
             )
         }
     }
+
+    private fun RedditMediaResolver.RedditPost.toTaskMetadata(): Task.RedditPostMetadata =
+        Task.RedditPostMetadata(
+            postId = id,
+            postTitle = title,
+            author = author,
+            sourceUrl = canonicalUrl,
+            createdUtc = createdUtc,
+            comments =
+                comments.map { comment ->
+                    Task.RedditComment(
+                        id = comment.id,
+                        author = comment.author,
+                        body = comment.body,
+                        score = comment.score,
+                        createdUtc = comment.createdUtc,
+                        depth = comment.depth,
+                        permalink = comment.permalink,
+                    )
+                },
+            totalCommentCount = totalCommentCount,
+        )
 
     private fun collectionLabel(collection: RedditCollection?, label: String): String =
         collection?.let {

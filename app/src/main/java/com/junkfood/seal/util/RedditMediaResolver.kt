@@ -18,6 +18,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -26,6 +27,7 @@ import okhttp3.Request
 
 object RedditMediaResolver {
     const val MAX_FEED_POSTS = 1_000
+    const val MAX_SAVED_COMMENTS = 500
     private const val FEED_PAGE_SIZE = 100
     private const val FEED_PAGE_DELAY_MILLIS = 250L
 
@@ -51,6 +53,8 @@ object RedditMediaResolver {
         val createdUtc: Long,
         val media: List<MediaItem>,
         val isVideoPost: Boolean = false,
+        val comments: List<RedditComment> = emptyList(),
+        val totalCommentCount: Int = comments.size,
     ) {
         val isDirectMediaPost: Boolean
             get() = media.isNotEmpty()
@@ -58,6 +62,16 @@ object RedditMediaResolver {
         val isDownloadablePost: Boolean
             get() = isDirectMediaPost || isVideoPost
     }
+
+    data class RedditComment(
+        val id: String,
+        val author: String,
+        val body: String,
+        val score: Int,
+        val createdUtc: Long,
+        val depth: Int,
+        val permalink: String,
+    )
 
     enum class FeedKind {
         Subreddit,
@@ -135,8 +149,8 @@ object RedditMediaResolver {
 
             val endpoints =
                 listOf(
-                    "https://www.reddit.com/comments/$postId/.json?raw_json=1&limit=0",
-                    "https://old.reddit.com/comments/$postId/.json?raw_json=1&limit=0",
+                    "https://www.reddit.com/comments/$postId/.json?raw_json=1&sort=top&limit=$MAX_SAVED_COMMENTS&depth=10",
+                    "https://old.reddit.com/comments/$postId/.json?raw_json=1&sort=top&limit=$MAX_SAVED_COMMENTS&depth=10",
                 )
             var lastFailure: Throwable? = null
             for (endpoint in endpoints) {
@@ -233,7 +247,12 @@ object RedditMediaResolver {
                 ?.get("data")
                 ?.jsonObject ?: error("Reddit post metadata is missing")
 
+        val comments = parseComments(root)
         return parsePostObject(post, canonicalUrl)
+            .copy(
+                comments = comments,
+                totalCommentCount = post["num_comments"]?.jsonPrimitive?.intOrNull ?: comments.size,
+            )
     }
 
     internal fun parseFeedPage(content: String, target: FeedTarget): FeedPage {
@@ -278,6 +297,62 @@ object RedditMediaResolver {
             media = finalizedMedia,
             isVideoPost = post.isVideoPost() || mediaPost.isVideoPost(),
         )
+    }
+
+    private fun parseComments(root: kotlinx.serialization.json.JsonElement): List<RedditComment> {
+        val commentListing =
+            (root as? JsonArray)?.getOrNull(1)?.let { runCatching { it.jsonObject }.getOrNull() }
+                ?: return emptyList()
+        val children =
+            commentListing["data"]
+                ?.let { runCatching { it.jsonObject }.getOrNull() }
+                ?.get("children")
+                ?.let { runCatching { it.jsonArray }.getOrNull() } ?: return emptyList()
+        val comments = mutableListOf<RedditComment>()
+
+        fun appendChildren(items: JsonArray, depth: Int) {
+            for (element in items) {
+                if (comments.size >= MAX_SAVED_COMMENTS) return
+                val wrapper = runCatching { element.jsonObject }.getOrNull() ?: continue
+                if (wrapper.string("kind") != "t1") continue
+                val data =
+                    wrapper["data"]?.let { runCatching { it.jsonObject }.getOrNull() } ?: continue
+                val body = data.string("body").orEmpty().trim()
+                if (body.isNotBlank()) {
+                    comments +=
+                        RedditComment(
+                            id = data.string("id").orEmpty(),
+                            author = data.string("author").orEmpty().ifBlank { "[deleted]" },
+                            body = body,
+                            score = data["score"]?.jsonPrimitive?.intOrNull ?: 0,
+                            createdUtc =
+                                data["created_utc"]?.jsonPrimitive?.doubleOrNull?.toLong() ?: 0L,
+                            depth = depth,
+                            permalink =
+                                data
+                                    .string("permalink")
+                                    ?.let {
+                                        if (it.startsWith("http")) it
+                                        else "https://www.reddit.com$it"
+                                    }
+                                    .orEmpty(),
+                        )
+                }
+
+                val replies = data["replies"]
+                val replyChildren =
+                    replies
+                        ?.let { runCatching { it.jsonObject }.getOrNull() }
+                        ?.get("data")
+                        ?.let { runCatching { it.jsonObject }.getOrNull() }
+                        ?.get("children")
+                        ?.let { runCatching { it.jsonArray }.getOrNull() }
+                if (replyChildren != null) appendChildren(replyChildren, depth + 1)
+            }
+        }
+
+        appendChildren(children, depth = 0)
+        return comments
     }
 
     internal fun extractPostId(url: String): String? {

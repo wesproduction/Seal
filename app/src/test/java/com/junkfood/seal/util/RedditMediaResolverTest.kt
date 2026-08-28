@@ -117,6 +117,28 @@ class RedditMediaResolverTest {
         )
     }
 
+    @Test
+    fun postCommentsKeepTopOrderAndReplyDepthInTheQueuedTask() {
+        val post =
+            RedditMediaResolver.parsePostJson(
+                content = COMMENT_JSON,
+                canonicalUrl = "https://www.reddit.com/r/pics/comments/withcomments/example/",
+            )
+
+        assertEquals(4, post.totalCommentCount)
+        assertEquals(listOf("top", "reply", "second"), post.comments.map { it.id })
+        assertEquals(listOf(0, 1, 0), post.comments.map { it.depth })
+        assertEquals("Unicode comment: こんにちは", post.comments[1].body)
+
+        val task =
+            TaskFactory.createFromRedditPost(post, DownloadUtil.DownloadPreferences.EMPTY)
+                .single()
+                .task
+        assertEquals(post.id, task.redditPost?.postId)
+        assertEquals(post.comments.size, task.redditPost?.comments?.size)
+        assertEquals(4, task.redditPost?.totalCommentCount)
+    }
+
     private companion object {
         val GALLERY_JSON =
             """
@@ -216,6 +238,78 @@ class RedditMediaResolverTest {
                 ]
               }
             }
+            """
+                .trimIndent()
+
+        val COMMENT_JSON =
+            """
+            [
+              {
+                "data": {
+                  "children": [
+                    {
+                      "data": {
+                        "id": "withcomments",
+                        "title": "Post with comments",
+                        "author": "poster",
+                        "created_utc": 1700000000,
+                        "num_comments": 4,
+                        "url": "https://i.redd.it/comment-test.jpg"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "data": {
+                  "children": [
+                    {
+                      "kind": "t1",
+                      "data": {
+                        "id": "top",
+                        "author": "first_user",
+                        "body": "Top comment",
+                        "score": 42,
+                        "created_utc": 1700000100,
+                        "permalink": "/r/pics/comments/withcomments/example/top/",
+                        "replies": {
+                          "data": {
+                            "children": [
+                              {
+                                "kind": "t1",
+                                "data": {
+                                  "id": "reply",
+                                  "author": "reply_user",
+                                  "body": "Unicode comment: こんにちは",
+                                  "score": 7,
+                                  "created_utc": 1700000200,
+                                  "replies": ""
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "kind": "t1",
+                      "data": {
+                        "id": "second",
+                        "author": "second_user",
+                        "body": "Second top-level comment",
+                        "score": 5,
+                        "created_utc": 1700000300,
+                        "replies": ""
+                      }
+                    },
+                    {
+                      "kind": "more",
+                      "data": {"count": 1}
+                    }
+                  ]
+                }
+              }
+            ]
             """
                 .trimIndent()
     }
